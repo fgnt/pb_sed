@@ -1,0 +1,297 @@
+{
+  "batch_size": 16,
+  "cnn_checkpoints": [],
+  "cnn_config": null,
+  "cnn_dirs": [],
+  "crnn_checkpoints": [
+    "ckpt_best_mean_fscore.pth",
+    "ckpt_best_mean_fscore.pth",
+    "ckpt_best_mean_fscore.pth",
+    "ckpt_best_mean_fscore.pth"
+  ],
+  "crnn_config": {
+    "audio_reader": {
+      "source_sample_rate": null,
+      "target_sample_rate": 16000
+    },
+    "batch_size": 16,
+    "bucket_expiration": 32000,
+    "cached_datasets": [
+      "desed_real_weak",
+      "desed_synthetic"
+    ],
+    "debug": false,
+    "lr_decay_step": 15000,
+    "max_mixup_length": 751,
+    "max_padding_rate": 0.05,
+    "max_total_size": null,
+    "min_examples": {
+      "desed_real_weak": 4
+    },
+    "mixup_probs": [
+      0.3333333333333333,
+      0.6666666666666666
+    ],
+    "num_workers": 8,
+    "prefetch_buffer": 160,
+    "rampup_steps": 1000,
+    "repetitions": {
+      "desed_real_unlabel_in_domain_pseudo_weak_2020-07-03-22-27-00": 1,
+      "desed_real_weak": 10,
+      "desed_synthetic": 2
+    },
+    "resume": false,
+    "seed": 544755356,
+    "stft": {
+      "fading": null,
+      "pad": false,
+      "shift": 320,
+      "size": 1024,
+      "window_length": 960
+    },
+    "subdir": "dcase_2020_fbcrnn/2020-07-04-00-35-41",
+    "trainer": {
+      "checkpoint_trigger": [
+        1000,
+        "iteration"
+      ],
+      "factory": "padertorch.train.trainer.Trainer",
+      "loss_weights": null,
+      "model": {
+        "clf_bwd": {
+          "activation_fn": "relu",
+          "dense_connections": null,
+          "dilation": 1,
+          "dropout": 0.0,
+          "factory": "padertorch.contrib.je.modules.conv.CNN1d",
+          "gated": false,
+          "in_channels": 256,
+          "input_layer": true,
+          "kernel_size": 1,
+          "norm": "batch",
+          "norm_kwargs": null,
+          "out_channels": [
+            256,
+            10
+          ],
+          "output_layer": true,
+          "pad_side": "both",
+          "pool_size": 1,
+          "pool_type": "max",
+          "pre_activation": false,
+          "residual_connections": null,
+          "return_pool_indices": false,
+          "stride": 1
+        },
+        "clf_fwd": {
+          "activation_fn": "relu",
+          "dense_connections": null,
+          "dilation": 1,
+          "dropout": 0.0,
+          "factory": "padertorch.contrib.je.modules.conv.CNN1d",
+          "gated": false,
+          "in_channels": 256,
+          "input_layer": true,
+          "kernel_size": 1,
+          "norm": "batch",
+          "norm_kwargs": null,
+          "out_channels": [
+            256,
+            10
+          ],
+          "output_layer": true,
+          "pad_side": "both",
+          "pool_size": 1,
+          "pool_type": "max",
+          "pre_activation": false,
+          "residual_connections": null,
+          "return_pool_indices": false,
+          "stride": 1
+        },
+        "cnn_1d": {
+          "activation_fn": "relu",
+          "dense_connections": null,
+          "dilation": 1,
+          "dropout": 0.0,
+          "factory": "padertorch.contrib.je.modules.conv.CNN1d",
+          "gated": false,
+          "in_channels": 1024,
+          "input_layer": true,
+          "kernel_size": 3,
+          "norm": "batch",
+          "norm_kwargs": null,
+          "out_channels": [
+            256,
+            256,
+            256
+          ],
+          "output_layer": false,
+          "pad_side": "both",
+          "pool_size": 1,
+          "pool_type": "max",
+          "pre_activation": false,
+          "residual_connections": null,
+          "return_pool_indices": false,
+          "stride": 1
+        },
+        "cnn_2d": {
+          "activation_fn": "relu",
+          "dense_connections": null,
+          "dilation": 1,
+          "dropout": 0.0,
+          "factory": "padertorch.contrib.je.modules.conv.CNN2d",
+          "gated": false,
+          "in_channels": 1,
+          "input_layer": true,
+          "kernel_size": 3,
+          "norm": "batch",
+          "norm_kwargs": null,
+          "out_channels": [
+            16,
+            16,
+            32,
+            32,
+            64,
+            64,
+            128,
+            128,
+            256
+          ],
+          "output_layer": false,
+          "pad_side": "both",
+          "pool_size": [
+            1,
+            [
+              2,
+              1
+            ],
+            1,
+            [
+              2,
+              1
+            ],
+            1,
+            [
+              2,
+              1
+            ],
+            1,
+            [
+              2,
+              1
+            ],
+            [
+              2,
+              1
+            ]
+          ],
+          "pool_type": "max",
+          "pre_activation": false,
+          "residual_connections": null,
+          "return_pool_indices": false,
+          "stride": 1
+        },
+        "factory": "pb_sed.models.fbcrnn.FBCRNN",
+        "feature_extractor": {
+          "add_delta_deltas": false,
+          "add_deltas": false,
+          "blur_kernel_size": 5,
+          "blur_sigma": 0.5,
+          "factory": "padertorch.contrib.je.modules.features.NormalizedLogMelExtractor",
+          "fft_length": 1024,
+          "fmax": null,
+          "fmin": 50,
+          "max_masked_mel_rate": 0.2,
+          "max_masked_mel_steps": 20,
+          "max_masked_time_rate": 0.2,
+          "max_masked_time_steps": 70,
+          "max_noise_scale": 0.2,
+          "max_resample_rate": 1.0,
+          "mel_norm_eps": 1e-05,
+          "mel_norm_statistics_axis": "bt",
+          "n_mel_masks": 1,
+          "n_mels": 128,
+          "n_time_masks": 1,
+          "sample_rate": 16000,
+          "warping_fn": {
+            "alpha_sampling_fn": {
+              "center": 0.0,
+              "factory": "padertorch.contrib.je.modules.augment.LogTruncNormalSampler",
+              "scale": 0.08,
+              "truncation": 0.26236426446749106
+            },
+            "factory": "padertorch.contrib.je.modules.augment.MelWarping",
+            "fhi_sampling_fn": {
+              "factory": "padertorch.contrib.je.modules.augment.TruncExponentialSampler",
+              "scale": 0.5,
+              "shift": 0.0,
+              "truncation": 5.0
+            }
+          }
+        },
+        "freeze_cnns": false,
+        "rnn_bwd": {
+          "bias": true,
+          "bidirectional": false,
+          "dropout": 0.0,
+          "factory": "padertorch.contrib.je.modules.rnn.GRU",
+          "hidden_size": 256,
+          "input_size": 256,
+          "num_layers": 2
+        },
+        "rnn_fwd": {
+          "bias": true,
+          "bidirectional": false,
+          "dropout": 0.0,
+          "factory": "padertorch.contrib.je.modules.rnn.GRU",
+          "hidden_size": 256,
+          "input_size": 256,
+          "num_layers": 2
+        }
+      },
+      "optimizer": {
+        "amsgrad": false,
+        "betas": [
+          0.9,
+          0.999
+        ],
+        "eps": 1e-08,
+        "factory": "padertorch.train.optimizer.Adam",
+        "gradient_clipping": 20.0,
+        "lr": 0.0005,
+        "weight_decay": 1e-06
+      },
+      "stop_trigger": [
+        40000,
+        "iteration"
+      ],
+      "storage_dir": "/net/vol/ebbers/exp/dcase_2020_fbcrnn/2020-07-04-00-35-41",
+      "summary_trigger": [
+        100,
+        "iteration"
+      ],
+      "virtual_minibatch_size": 1
+    }
+  },
+  "crnn_dirs": [
+    "/net/vol/ebbers/exp/dcase_2020_fbcrnn/2020-07-04-00-35-41",
+    "/net/vol/ebbers/exp/dcase_2020_fbcrnn/2020-07-04-00-35-43",
+    "/net/vol/ebbers/exp/dcase_2020_fbcrnn/2020-07-04-00-35-48",
+    "/net/vol/ebbers/exp/dcase_2020_fbcrnn/2020-07-04-00-35-52"
+  ],
+  "dataset_name": "desed_real_unlabel_in_domain",
+  "debug": false,
+  "detection_threshold_name": "best_frame_f1",
+  "device": 0,
+  "ensembles": [
+    "crnn"
+  ],
+  "hyper_params_dir": "/net/vol/ebbers/exp/dcase_2020_hyper_params/2020-07-04-17-27-00/",
+  "max_padding_rate": 0.1,
+  "num_workers": 8,
+  "reference_file": null,
+  "seed": 700113280,
+  "storage_dir": "/net/vol/ebbers/exp/dcase_2020_detection/2020-07-04-22-33-13",
+  "subdir": "dcase_2020_detection/2020-07-04-22-33-13",
+  "tagging_thresholds": "/net/vol/ebbers/exp/dcase_2020_hyper_params/2020-07-04-17-27-00/tagging_thresholds_best_f1.json"
+}

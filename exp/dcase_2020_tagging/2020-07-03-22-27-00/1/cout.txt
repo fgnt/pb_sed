@@ -1,0 +1,5 @@
+INFO - dcase_2020_tagging - Running command 'main'
+INFO - dcase_2020_tagging - Started run with ID "1"
+Data set length desed_real_unlabel_in_domain: 14411
+Output file: /net/vol/ebbers/exp/dcase_2020_tagging/2020-07-03-22-27-00/unlabel_in_domain_pseudo_weak_2020-07-03-22-27-00.tsv
+INFO - dcase_2020_tagging - Completed after 0:13:37

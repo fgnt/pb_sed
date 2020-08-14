@@ -1,0 +1,53 @@
+INFO - dcase_2020_detection - Running command 'main'
+INFO - dcase_2020_detection - Started run with ID "1"
+Data set length desed_real_unlabel_in_domain: 14411
+#Params: 3488580
+#Params: 3488580
+#Params: 3488580
+#Params: 3488580
+Ensemble: crnn_20
+  Medfilt size: 51
+  Medfilt size: 41
+  Medfilt size: 31
+  Medfilt size: 21
+Ensemble: crnn_15
+  Medfilt size: 51
+  Medfilt size: 41
+  Medfilt size: 31
+  Medfilt size: 21
+Ensemble: crnn_10
+  Medfilt size: 51
+  Medfilt size: 41
+  Medfilt size: 31
+  Medfilt size: 21
+Ensemble: crnn_5
+  Medfilt size: 51
+  Medfilt size: 41
+  Medfilt size: 31
+  Medfilt size: 21
+crnn report:
+Join sub-files:
+  /net/vol/ebbers/exp/dcase_2020_detection/2020-07-04-22-33-13/unlabel_in_domain_pseudo_strong_Alarm_bell_ringing_crnn_5_31.tsv
+  /net/vol/ebbers/exp/dcase_2020_detection/2020-07-04-22-33-13/unlabel_in_domain_pseudo_strong_Blender_crnn_10_41.tsv
+  /net/vol/ebbers/exp/dcase_2020_detection/2020-07-04-22-33-13/unlabel_in_domain_pseudo_strong_Cat_crnn_5_31.tsv
+  /net/vol/ebbers/exp/dcase_2020_detection/2020-07-04-22-33-13/unlabel_in_domain_pseudo_strong_Dishes_crnn_10_21.tsv
+  /net/vol/ebbers/exp/dcase_2020_detection/2020-07-04-22-33-13/unlabel_in_domain_pseudo_strong_Dog_crnn_10_21.tsv
+  /net/vol/ebbers/exp/dcase_2020_detection/2020-07-04-22-33-13/unlabel_in_domain_pseudo_strong_Electric_shaver_toothbrush_crnn_20_51.tsv
+  /net/vol/ebbers/exp/dcase_2020_detection/2020-07-04-22-33-13/unlabel_in_domain_pseudo_strong_Frying_crnn_10_51.tsv
+  /net/vol/ebbers/exp/dcase_2020_detection/2020-07-04-22-33-13/unlabel_in_domain_pseudo_strong_Running_water_crnn_20_51.tsv
+  /net/vol/ebbers/exp/dcase_2020_detection/2020-07-04-22-33-13/unlabel_in_domain_pseudo_strong_Speech_crnn_10_31.tsv
+  /net/vol/ebbers/exp/dcase_2020_detection/2020-07-04-22-33-13/unlabel_in_domain_pseudo_strong_Vacuum_cleaner_crnn_15_31.tsv
+to output file: /net/vol/ebbers/exp/dcase_2020_detection/2020-07-04-22-33-13/unlabel_in_domain_pseudo_strong_2020-07-04-22-33-13_crnn.tsv
+final report:
+Join sub-files:
+  /net/vol/ebbers/exp/dcase_2020_detection/2020-07-04-22-33-13/unlabel_in_domain_pseudo_strong_Alarm_bell_ringing_crnn_5_31.tsv
+  /net/vol/ebbers/exp/dcase_2020_detection/2020-07-04-22-33-13/unlabel_in_domain_pseudo_strong_Blender_crnn_10_41.tsv
+  /net/vol/ebbers/exp/dcase_2020_detection/2020-07-04-22-33-13/unlabel_in_domain_pseudo_strong_Cat_crnn_5_31.tsv
+  /net/vol/ebbers/exp/dcase_2020_detection/2020-07-04-22-33-13/unlabel_in_domain_pseudo_strong_Dishes_crnn_10_21.tsv
+  /net/vol/ebbers/exp/dcase_2020_detection/2020-07-04-22-33-13/unlabel_in_domain_pseudo_strong_Dog_crnn_10_21.tsv
+  /net/vol/ebbers/exp/dcase_2020_detection/2020-07-04-22-33-13/unlabel_in_domain_pseudo_strong_Electric_shaver_toothbrush_crnn_20_51.tsv
+  /net/vol/ebbers/exp/dcase_2020_detection/2020-07-04-22-33-13/unlabel_in_domain_pseudo_strong_Frying_crnn_10_51.tsv
+  /net/vol/ebbers/exp/dcase_2020_detection/2020-07-04-22-33-13/unlabel_in_domain_pseudo_strong_Running_water_crnn_20_51.tsv
+  /net/vol/ebbers/exp/dcase_2020_detection/2020-07-04-22-33-13/unlabel_in_domain_pseudo_strong_Speech_crnn_10_31.tsv
+  /net/vol/ebbers/exp/dcase_2020_detection/2020-07-04-22-33-13/unlabel_in_domain_pseudo_strong_Vacuum_cleaner_crnn_15_31.tsv
+to output file: /net/vol/ebbers/exp/dcase_2020_detection/2020-07-04-22-33-13/unlabel_in_domain_pseudo_strong_2020-07-04-22-33-13.tsv
