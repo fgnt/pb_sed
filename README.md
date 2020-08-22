@@ -5,7 +5,7 @@ Paderborn Sound Event Detection
 ## Installation
 Install requirements
 ```bash
-$ pip install --user git+https://github.com/fgnt/lazy_dataset.git@10d3293cc8639408739a95b0a8a7ed50845a88a5
+$ pip install --user git+https://github.com/fgnt/lazy_dataset.git@d500d23d23c0cc2ebb874c4974b4ffa7a2418b96
 $ pip install --user git+https://github.com/fgnt/paderbox.git@38a8ef284c0ca675bf64cbacd57f6957bc4acac5
 $ pip install --user git+https://github.com/fgnt/padertorch.git@0ea8a7d31b400115d7dfbd4fdb6e1b8542abef82
 ```
