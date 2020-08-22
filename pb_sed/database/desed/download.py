@@ -145,10 +145,6 @@ def main(database_path, n_jobs, chunk_size):
     (dataset_real_path / "dataset" / "audio" / "eval" / "public").rename(
         dataset_real_path / "audio" / "eval" / "eval_dcase2019"
     )
-    copyfile(
-        pb_sed_root / 'exp' / 'dcase_2020_tagging' / '2020-07-03-22-27-00' / 'unlabel_in_domain_pseudo_weak_2020-07-03-22-27-00.tsv',
-        dataset_real_path / "metadata" / "train" / 'unlabel_in_domain_pseudo_weak_2020-07-03-22-27-00.tsv',
-    )
 
     # Download Synthetic
     dataset_synthetic_path = database_path / 'synthetic'
