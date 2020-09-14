@@ -15,7 +15,7 @@ def construct_json(database_path):
     # desed_real
     real_dataset_path = database_path/'real'
     for purpose in ['train', 'validation', 'eval']:
-        files = list((real_dataset_path / 'metadata' / purpose).glob('*.tsv'))
+        files = sorted((real_dataset_path / 'metadata' / purpose).glob('*.tsv'))
         for segment_file in files:
             name = segment_file.name[:-len('.tsv')]
             audio_dir = real_dataset_path / 'audio' / purpose

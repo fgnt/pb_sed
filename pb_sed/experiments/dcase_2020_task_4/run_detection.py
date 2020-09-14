@@ -38,7 +38,7 @@ def config():
     cnn_dirs = tuning_config['cnn_dirs']
     cnn_config = tuning_config['cnn_config']
     cnn_checkpoints = tuning_config['cnn_checkpoints']
-    tagging_thresholds = str(Path(hyper_params_dir)/'tagging_thresholds_best_f1.json')
+    tagging_thresholds = str(Path(hyper_params_dir) / 'tagging_thresholds_best_f1.json')
     detection_threshold_name = 'best_event_f1'
     ensembles = tuning_config['ensembles']
     del tuning_config
@@ -184,8 +184,8 @@ def main(
                         if k != i:
                             continue
                         label = labels[k]
-                        onset = (stft.stft_frame_index_to_sample_index(onset)+stft.window_length/2) / sr
-                        offset = (stft.stft_frame_index_to_sample_index(offset-1)+stft.window_length/2) / sr
+                        onset = (stft.stft_frame_index_to_center_index(onset) + stft.window_length / 2) / sr
+                        offset = (stft.stft_frame_index_to_center_index(offset - 1) + stft.window_length / 2) / sr
                         fid.write(f'{example_id}.wav\t{onset}\t{offset}\t{label}\n')
 
     cnn_detection_score_mat = None

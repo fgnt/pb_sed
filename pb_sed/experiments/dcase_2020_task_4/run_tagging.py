@@ -28,7 +28,7 @@ def config():
     crnn_dirs = tuning_config['crnn_dirs']
     crnn_config = tuning_config['crnn_config']
     crnn_checkpoints = tuning_config['crnn_checkpoints']
-    tagging_thresholds = str(Path(hyper_params_dir)/'tagging_thresholds_best_f1.json')
+    tagging_thresholds = str(Path(hyper_params_dir) / 'tagging_thresholds_best_f1.json')
     del tuning_config
 
     dataset_name = 'desed_real_unlabel_in_domain'
@@ -110,8 +110,8 @@ def main(
     if evaluate:
         assert target_mat is not None
         f, p, r = fscore(target_mat, tags, event_wise=True)
-        print('F-scores:', np.round(f, decimals=3).tolist())
-        print('Macro F-score:', np.round(f.mean(), decimals=3))
+        print('F-scores:', np.round(f, decimals=4).tolist())
+        print('Macro F-score:', np.round(f.mean(), decimals=4))
     labels = load_json(Path(crnn_dirs[0]) / 'events.json')
     dataset_prefix = dataset_name.split("desed_real_")[-1]
     file = Path(storage_dir) / f'{dataset_prefix}_pseudo_weak_{ts}.tsv'

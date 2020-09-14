@@ -34,7 +34,8 @@ def config():
         'target_sample_rate': 16000,
     }
     cached_datasets = [] if debug else [
-        'desed_real_weak_pseudo_strong_2020-07-04-22-16-46', 'desed_synthetic'
+        'desed_real_weak_pseudo_strong_2020-07-04-22-16-46',
+        'desed_synthetic',
     ]
     stft = {
         'shift': 320,
@@ -47,7 +48,11 @@ def config():
     mixup_probs = (.5, .5)
     max_mixup_length = int(12.*audio_reader['target_sample_rate']/stft['shift']) + 1
     batch_size = 24
-    min_examples = {}
+    min_examples = {
+        'desed_real_weak_pseudo_strong_2020-07-04-22-16-46': int(batch_size/3),
+        'desed_real_unlabel_in_domain_pseudo_strong_2020-07-04-22-33-13': 0,
+        'desed_synthetic': 0,
+    }
     num_workers = 8
     prefetch_buffer = 10 * batch_size
     max_total_size = None
@@ -126,7 +131,7 @@ def config():
 @ex.automain
 def train(
         _run,
-        repetitions, audio_reader, stft,
+        repetitions, audio_reader, cached_datasets, stft,
         mixup_probs, max_mixup_length,
         num_workers, prefetch_buffer,
         batch_size, max_padding_rate, bucket_expiration, min_examples,
@@ -146,6 +151,7 @@ def train(
         bucket_expiration=bucket_expiration, min_examples=min_examples,
         storage_dir=trainer.storage_dir,
         add_alignment=True,
+        cached_datasets=cached_datasets,
     )
     validation_set = data.get_dataset(
         'desed_real_validation', audio_reader=audio_reader,

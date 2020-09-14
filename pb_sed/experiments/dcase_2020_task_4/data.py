@@ -209,7 +209,7 @@ def prepare_dataset(
         dataset = MixUpDataset(
             dataset,
             sample_fn=SampleMixupComponents(mixup_probs),
-            mixup_fn=SuperposeEvents(min_overlap=.5, max_length=max_mixup_length, join_dataset_names_fn=lambda names: names[0]),
+            mixup_fn=SuperposeEvents(min_overlap=.5, max_length=max_mixup_length),
             buffer_size=100*batch_size,
         )
     if min_examples is None:
@@ -241,18 +241,20 @@ class DatasetBalancedTimeSeriesBucket(DynamicTimeSeriesBucket):
         self.missing = {key: value for key, value in min_examples.items()}
 
     def assess(self, example):
+        names = example['dataset'].split('+')  # '+' indicates mixtures
+        assert all([name in self.missing for name in names]), (
+            names, sorted(self.missing.keys())
+        )
         return (
-            super().assess(example)
-            and (
+            super().assess(example) and (
                 (self.batch_size - len(self.data)) > sum(self.missing.values())
-                or (
-                    example['dataset'] in self.missing
-                    and self.missing[example['dataset']] > 0
-                )
+                or
+                any([self.missing[name] > 0 for name in names])
             )
         )
 
     def _append(self, example):
         super()._append(example)
-        if example['dataset'] in self.missing and self.missing[example['dataset']] > 0:
-            self.missing[example['dataset']] -= 1
+        for name in example['dataset'].split('+'):
+            if self.missing[name] > 0:
+                self.missing[name] -= 1

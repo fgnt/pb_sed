@@ -45,7 +45,11 @@ def config():
     mixup_probs = (1/3, 2/3)
     max_mixup_length = int(15.*audio_reader['target_sample_rate']/stft['shift'])+1
     batch_size = 16
-    min_examples = {'desed_real_weak': int(batch_size/4)}
+    min_examples = {
+        'desed_real_weak': int(batch_size/3),
+        'desed_real_unlabel_in_domain_pseudo_weak_2020-07-03-22-27-00': 0,
+        'desed_synthetic': 0,
+    }
     num_workers = 8
     prefetch_buffer = 10 * batch_size
     max_total_size = None

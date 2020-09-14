@@ -1,5 +1,6 @@
 import numpy as np
 from pb_sed.utils import correlate
+from pb_sed.evaluation.instance_based import f1_curve, er_curve
 
 
 def alignments_to_event_list(alignment_mat):
@@ -78,7 +79,7 @@ def fscore(
                 (decision_event_list[i][0] < n)
                 or (
                     decision_event_list[i][0] == n
-                    and decision_event_list[i][1] < (ton - collar)
+                    and decision_event_list[i][1] <= (ton - collar)
                 )
             )
         ):
@@ -92,11 +93,11 @@ def fscore(
         while (
             not hit and ((i+j) < len(decision_event_list))
             and decision_event_list[i+j][0] == n
-            and decision_event_list[i+j][1] <= (ton + collar)
+            and decision_event_list[i+j][1] < (ton + collar)
         ):
             if (
                 decision_event_list[i+j][3] == k
-                and np.abs(decision_event_list[i+j][2] - toff) <= offset_collar
+                and np.abs(decision_event_list[i+j][2] - toff) < offset_collar
             ):
                 tp[k] += 1
                 decision_event_list.pop(i+j)
@@ -120,8 +121,8 @@ def fscore(
     return f_beta, precision, recall
 
 
-def get_optimal_threshold(
-        target_mat, score_mat, metric, collar, offset_collar_rate,
+def get_optimal_thresholds(
+        target_mat, score_mat, metric, collar, offset_collar_rate, decimals=4
 ):
     """
 
@@ -136,17 +137,18 @@ def get_optimal_threshold(
 
     >>> target_mat_1 = np.array([[0.,0.,1.,1.,1.,0.,0.,0.,1.,1.],[1.,1.,1.,1.,1.,0.,0.,0.,0.,0.]])[..., None]
     >>> score_mat_1 = np.array([[0.,0.,0.,0.,.92,.81,0.,0.,.80,.64],[.32,.67,.44,.75,.22,.11,.11,0.,0.,0.]])[..., None]
-    >>> get_optimal_threshold(target_mat_1, score_mat_1, 'fscore', 1, .5)
-    (array([0.22]), array([0.66666667]))
+    >>> get_optimal_thresholds(target_mat_1, score_mat_1, 'f1', 1, .5)
+    (array([0.165]), array([0.66666667]))
     >>> target_mat_2 = np.array([[0,0,0,1,1,1,0,0,0,0],[0,0,0,1,1,1,0,0,0,0]])[..., None]
     >>> score_mat_2 = np.array([[0,0,0,1,1,1,0,0,0,0],[0,0,0,0,0,0,0,0,0,0]])[..., None]
     >>> score_mat = np.concatenate((score_mat_1, score_mat_2), axis=-1)
     >>> target_mat = np.concatenate((target_mat_1, target_mat_2), axis=-1)
-    >>> get_optimal_threshold(target_mat, score_mat, 'fscore', 1, .5)
-    (array([0.22, 0.5 ]), array([0.66666667, 0.66666667]))
+    >>> get_optimal_thresholds(target_mat, score_mat, 'f1', 1, .5)
+    (array([0.165, 0.5  ]), array([0.66666667, 0.66666667]))
 
     """
-    threshold = []
+    assert collar > 0, collar
+    thresholds = []
     values = []
     b, t, k = target_mat.shape
     for label_idx in range(target_mat.shape[-1]):
@@ -169,10 +171,10 @@ def get_optimal_threshold(
             offset_collar = int(max(
                 collar, offset_collar_rate * (t_off - t_on)
             ))
-            onset_collar_onset = max(t_on - collar - 1, 0)
-            onset_collar_offset = t_on + collar
-            offset_collar_onset = max(t_off - offset_collar, 0)
-            offset_collar_offset = t_off + offset_collar + 1
+            onset_collar_onset = max(t_on - collar, 0)
+            onset_collar_offset = t_on + collar - 1
+            offset_collar_onset = max(t_off - offset_collar + 1, 0)
+            offset_collar_offset = t_off + offset_collar
             if offset_collar_onset <= onset_collar_offset:
                 onset_collar_offset = offset_collar_onset + np.argmax(cur_scores[n_on, max(offset_collar_onset-1, 0):onset_collar_offset+1]) - 1
                 offset_collar_onset = onset_collar_offset + 1
@@ -182,8 +184,8 @@ def get_optimal_threshold(
 
             max_detection_score_idx = onset_collar_offset+np.argmin(scores_inner)
 
-            min_onset_detection_score_idx = None if t_on <= collar else onset_collar_onset + np.argmin(scores_onset_collar)
-            min_offset_detection_score_idx = None if t-t_off <= offset_collar else offset_collar_onset+np.argmin(scores_offset_collar)
+            min_onset_detection_score_idx = None if t_on < collar else onset_collar_onset + np.argmin(scores_onset_collar)
+            min_offset_detection_score_idx = None if t-t_off < offset_collar else offset_collar_onset+np.argmin(scores_offset_collar)
             if min_onset_detection_score_idx is not None and min_offset_detection_score_idx is not None:
                 if cur_scores[n_on, min_onset_detection_score_idx] > cur_scores[n_on, min_offset_detection_score_idx]:
                     min_detection_score_idx = min_onset_detection_score_idx
@@ -203,40 +205,39 @@ def get_optimal_threshold(
             # else: cannot be detected as true positive
 
         cur_scores = cur_scores.flatten()
+        cur_targets = cur_targets.flatten()
         onset_counts = onset_counts.flatten()
         tp_counts = tp_counts.flatten()
-        relevant_indices = np.argwhere((onset_counts != 0) | (tp_counts != 0)).flatten()
-        cur_scores = cur_scores[relevant_indices]
-        onset_counts = onset_counts[relevant_indices]
-        tp_counts = tp_counts[relevant_indices]
         sort_indices = np.argsort(cur_scores)
         cur_scores = np.concatenate((cur_scores[sort_indices], [np.inf]))
         onset_counts = np.concatenate((onset_counts[sort_indices], [0]))
         tp_counts = np.concatenate((tp_counts[sort_indices], [0]))
+
         tps = np.cumsum(tp_counts[::-1])[::-1]
         n_sys = np.cumsum(onset_counts[::-1])[::-1]
-        cur_scores, valid_idx = np.unique(cur_scores, return_index=True)
+
+        _, valid_idx = np.unique(cur_scores, return_index=True)
         tps = tps[valid_idx]
         n_sys = n_sys[valid_idx]
-        tps = np.concatenate((tps, [0]))
-        n_sys = np.concatenate((n_sys, [0]))
         n_ref = len(target_onset_indices)
 
-        if metric == 'fscore':
+        if metric == 'f1':
             p = tps / np.maximum(n_sys, 1)
             r = tps / np.maximum(n_ref, 1)
-            value = 2*p*r / (p+r+1e-15)
-            idx = np.argmax(value)
+            event_based_value = 2*p*r / (p + r + 1e-15)
+            instance_based_f1, cur_thresholds = f1_curve(cur_targets, cur_scores[:-1])
+            assert len(cur_thresholds) == len(event_based_value), (len(cur_thresholds), len(event_based_value))
+            idx = np.argmax(np.round(event_based_value, decimals=decimals) + 10**(-decimals) * instance_based_f1)
         elif metric == 'er':
             i = n_sys - tps
             d = n_ref - tps
-            value = (i+d)/n_ref
-            idx = np.argmin(value)
+            event_based_value = (i+d) / n_ref
+            instance_based_er, cur_thresholds = er_curve(cur_targets, cur_scores[:-1])
+            assert len(cur_thresholds) == len(event_based_value), (len(cur_thresholds), len(event_based_value))
+            idx = np.argmin(np.round(event_based_value, decimals=decimals) + 10**(-decimals) * instance_based_er)
         else:
             raise NotImplementedError
-        values.append(value[idx])
-        threshold.append(
-            -np.inf if idx == 0 else np.inf if idx == len(cur_scores)
-            else (cur_scores[idx-1]+cur_scores[idx])/2
-        )
-    return np.array(threshold), np.array(values)
+
+        values.append(event_based_value[idx])
+        thresholds.append(cur_thresholds[idx])
+    return np.array(thresholds), np.array(values)

@@ -7,7 +7,7 @@ from padertorch.contrib.je.modules.conv_utils import Pad
 from padertorch.contrib.je.modules.features import NormalizedLogMelExtractor
 from padertorch.contrib.je.modules.reduce import Mean, TakeLast
 from padertorch.contrib.je.modules.rnn import GRU, reverse_sequence
-from pb_sed.evaluation.instance_based import get_optimal_threshold
+from pb_sed.evaluation.instance_based import get_optimal_thresholds
 from torch import nn
 from torchvision.utils import make_grid
 
@@ -35,7 +35,7 @@ class FBCRNN(Model):
     def __init__(
             self, feature_extractor, cnn_2d, cnn_1d,
             rnn_fwd, clf_fwd, rnn_bwd, clf_bwd, *,
-            freeze_cnns=False,
+            framewise_training=True, freeze_cnns=False
     ):
         super().__init__()
         self.feature_extractor = feature_extractor
@@ -45,6 +45,7 @@ class FBCRNN(Model):
         self._clf_fwd = clf_fwd
         self._rnn_bwd = rnn_bwd
         self._clf_bwd = clf_bwd
+        self.framewise_training = framewise_training
         self.freeze_cnns = freeze_cnns
 
     def cnn_2d(self, x, seq_len=None):
@@ -86,10 +87,17 @@ class FBCRNN(Model):
 
     def prediction_pooling(self, y_fwd, y_bwd, seq_len):
         if y_bwd is None:
-            y = TakeLast(axis=-1)(y_fwd, seq_len=seq_len)
-            seq_len = None
+            if self.training and self.framewise_training:
+                y = y_fwd
+            else:
+                y = TakeLast(axis=-1)(y_fwd, seq_len=seq_len)
+                seq_len = None
         elif self.training:
-            y = torch.max(y_fwd, y_bwd)
+            if self.framewise_training:
+                y = torch.max(y_fwd, y_bwd)
+            else:
+                y = torch.stack((TakeLast(axis=-1)(y_fwd, seq_len=seq_len), y_bwd[:, ..., 0]), dim=-1)
+                seq_len = None
         else:
             y = (TakeLast(axis=-1)(y_fwd, seq_len=seq_len) + y_bwd[:, ..., 0]) / 2
             seq_len = None
@@ -142,7 +150,10 @@ class FBCRNN(Model):
         bce = bce.mean()
 
         if y.dim() == 3:
-            y = (TakeLast(axis=-1)(y_fwd, seq_len=seq_len_y) + y_bwd[:, ..., 0]) / 2
+            if y_bwd is None:
+                y = TakeLast(axis=-1)(y_fwd, seq_len=seq_len_y)
+            else:
+                y = (TakeLast(axis=-1)(y_fwd, seq_len=seq_len_y) + y_bwd[:, ..., 0]) / 2
             targets = targets.max(-1)[0]
         review = dict(
             loss=bce,
@@ -162,8 +173,8 @@ class FBCRNN(Model):
             predictions = np.concatenate(summary['buffers'].pop('predictions'))
             k = predictions.shape[-1]
             targets = np.concatenate(summary['buffers'].pop('targets'))
-            best_thresholds, best_f = get_optimal_threshold(
-                targets, predictions, metric='fscore'
+            best_thresholds, best_f = get_optimal_thresholds(
+                targets, predictions, metric='f1'
             )
             for i in range(k):
                 summary['scalars'][f'fscores/{i}'] = best_f[i]

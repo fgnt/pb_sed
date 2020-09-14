@@ -112,11 +112,11 @@ def main(
         else:
             assert (target_mat_i == tagging_target_mat).all()
     tagging_score_mat = np.mean(tagging_score_mat, axis=0)
-    th_f, best_f = instance_based.get_optimal_threshold(tagging_target_mat, tagging_score_mat, metric='fscore')
+    th_f, best_f = instance_based.get_optimal_thresholds(tagging_target_mat, tagging_score_mat, metric='f1')
     dump_json(th_f.tolist(), Path(storage_dir) / 'tagging_thresholds_best_f1.json')
     print('  F-scores:', np.round(best_f, decimals=print_decimals).tolist())
     print('  Macro F-score:', np.round(best_f.mean(), decimals=print_decimals))
-    th_er, best_er = instance_based.get_optimal_threshold(tagging_target_mat, tagging_score_mat, metric='er')
+    th_er, best_er = instance_based.get_optimal_thresholds(tagging_target_mat, tagging_score_mat, metric='er')
     dump_json(th_er.tolist(), Path(storage_dir) / 'tagging_thresholds_best_er.json')
     print('  Error-rates:', np.round(best_er, decimals=print_decimals).tolist())
     print('  Macro error-rate:', np.round(best_er.mean(), decimals=print_decimals))
@@ -142,10 +142,10 @@ def main(
             else:
                 assert medfilt_size == 1, medfilt_size
                 score_mat_filtered = score_mat
-            thres, f1 = instance_based.get_optimal_threshold(
+            thres, f1 = instance_based.get_optimal_thresholds(
                 rearrange(target_mat, 'b t k -> (b t) k'),
                 rearrange(score_mat_filtered, 'b t k -> (b t) k'),
-                metric='fscore'
+                metric='f1'
             )
             dump_json(
                 thres.tolist(),
@@ -163,7 +163,7 @@ def main(
                 elif f_i > best_frame_f[ensemble][i][0]:
                     best_frame_f[ensemble][i] = (f_i, f'{name}_{medfilt_size}')
 
-            thres, er = instance_based.get_optimal_threshold(
+            thres, er = instance_based.get_optimal_thresholds(
                 rearrange(target_mat, 'b t k -> (b t) k'),
                 rearrange(score_mat_filtered, 'b t k -> (b t) k'),
                 metric='er'
@@ -184,11 +184,12 @@ def main(
                 elif er_i < best_frame_er[ensemble][i][0]:
                     best_frame_er[ensemble][i] = (er_i, f'{name}_{medfilt_size}')
 
-            thres, f1 = event_based.get_optimal_threshold(
-                target_mat, score_mat_filtered, metric='fscore',
+            thres, f1 = event_based.get_optimal_thresholds(
+                target_mat, score_mat_filtered, metric='f1',
                 collar=event_based_collar,
-                offset_collar_rate=event_based_offset_collar_rate
+                offset_collar_rate=event_based_offset_collar_rate,
             )
+
             dump_json(
                 thres.tolist(),
                 Path(storage_dir) /

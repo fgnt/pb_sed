@@ -123,7 +123,7 @@ class TagConditionedCNN(Model):
             candidate_thresholds = np.linspace(0., 1., self.n_thresholds)
             for i, idx in enumerate(best_idx):
                 summary['scalars'][f'fscores/{i}'] = best_f[i]
-                summary['scalars'][f'thresholds/{i}'] = candidate_thresholds[best_idx]
+                summary['scalars'][f'thresholds/{i}'] = candidate_thresholds[idx]
             summary['scalars']['mean_fscore'] = np.mean(best_f)
 
         for key, scalar in summary['scalars'].items():

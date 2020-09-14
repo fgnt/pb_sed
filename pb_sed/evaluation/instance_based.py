@@ -222,7 +222,55 @@ def lwlrap(target_mat, score_mat, event_wise=False):
         return lwlrap_score
 
 
-def get_optimal_threshold(target_mat, score_mat, metric):
+def _metric_curve(target_vec, score_vec, metric):
+    """
+
+    Args:
+        target_vec:
+        score_vec:
+        metric:
+
+    Returns:
+
+    >>> target_vec = np.array([1.0, 1.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+    >>> score_vec = np.array([0.6, 0.2, 0.5, 0.4, 0.3, 0.1, 0.7, 0.0, 0.0])
+    >>> _metric_curve(target_vec, score_vec, 'f1')
+
+    """
+    sort_indices = np.argsort(score_vec)
+    score_vec = np.concatenate((score_vec[sort_indices], [np.inf]))
+    target_vec = target_vec[sort_indices]
+
+    tps = np.cumsum(np.concatenate((target_vec, [0]))[::-1])[::-1]
+    n_sys = len(score_vec) - np.arange(len(score_vec)) - 1
+    n_ref = tps[0]
+
+    score_vec, valid_idx = np.unique(score_vec, return_index=True)
+    tps = tps[valid_idx]
+    n_sys = n_sys[valid_idx]
+    if metric == 'f1':
+        p = tps / np.maximum(n_sys, 1)
+        r = tps / np.maximum(n_ref, 1)
+        values = 2*p*r / (p+r+1e-15)
+    elif metric == 'er':
+        i = n_sys - tps
+        d = n_ref - tps
+        values = (i+d)/n_ref
+    else:
+        raise NotImplementedError
+    thresholds = np.concatenate(([-np.inf], (score_vec[1:]+score_vec[:-1])/2))
+    return values, thresholds
+
+
+def f1_curve(target_vec, score_vec):
+    return _metric_curve(target_vec, score_vec, metric='f1')
+
+
+def er_curve(target_vec, score_vec):
+    return _metric_curve(target_vec, score_vec, metric='er')
+
+
+def get_optimal_thresholds(target_mat, score_mat, metric):
     """
 
     Args:
@@ -232,44 +280,27 @@ def get_optimal_threshold(target_mat, score_mat, metric):
 
     Returns:
 
-    >>> target_mat = np.array([[1.0], [1.0], [0.0], [1.0], [0.0], [0.0], [0.0]])
-    >>> score_mat = np.array([[0.6], [0.2], [0.5], [.4], [0.3], [0.1], [0.7]])
-    >>> get_optimal_threshold(target_mat, score_mat, metric='fscore')
+    >>> target_mat = np.array([[1.0], [1.0], [0.0], [1.0], [0.0], [0.0], [0.0], [0.0], [0.0]])
+    >>> score_mat = np.array([[0.6], [0.2], [0.5], [.4], [0.3], [0.1], [0.7], [0.0], [0.0]])
+    >>> get_optimal_thresholds(target_mat, score_mat, metric='f1')
     (array([0.15]), array([0.66666667]))
     """
-    threshold = []
-    values = []
+    thresholds = []
+    best_values = []
     for label_idx in range(target_mat.shape[-1]):
-        cur_targets = target_mat[:, label_idx]
-        cur_scores = score_mat[:, label_idx]
-        sort_indices = np.argsort(cur_scores)
-        cur_scores = np.concatenate((cur_scores[sort_indices], [np.inf]))
-        cur_targets = cur_targets[sort_indices]
-        edge_detection = np.correlate(2*cur_targets-1, [-1, 1], mode='full')
-        edge_indices = np.argwhere(edge_detection > 0.5).flatten()
-        _, valid_idx = np.unique(cur_scores[edge_indices], return_index=True)
-        edge_indices = edge_indices[valid_idx]
-        tps = np.cumsum(np.concatenate((cur_targets, [0]))[::-1])[::-1][edge_indices]
-        n_sys = len(cur_scores) - 1 - edge_indices
-        n_ref = tps[0]
-        if metric == 'fscore':
-            p = tps / np.maximum(n_sys, 1)
-            r = tps / np.maximum(n_ref, 1)
-            value = 2*p*r / (p+r+1e-15)
-            idx = np.argmax(value)
+        target_vec = target_mat[:, label_idx]
+        score_vec = score_mat[:, label_idx]
+        if metric == 'f1':
+            cur_values, cur_thresholds = f1_curve(target_vec, score_vec)
+            best_idx = np.argmax(cur_values)
         elif metric == 'er':
-            i = n_sys - tps
-            d = n_ref - tps
-            value = (i+d)/n_ref
-            idx = np.argmin(value)
+            cur_values, cur_thresholds = er_curve(target_vec, score_vec)
+            best_idx = np.argmin(cur_values)
         else:
             raise NotImplementedError
-        values.append(value[idx])
-        idx = edge_indices[idx]
-        threshold.append(
-            -np.inf if idx == 0 else (cur_scores[idx-1]+cur_scores[idx])/2
-        )
-    return np.array(threshold), np.array(values)
+        best_values.append(cur_values[best_idx])
+        thresholds.append(cur_thresholds[best_idx])
+    return np.array(thresholds), np.array(best_values)
 
 
 def get_thresholds(target_mat, score_mat):
