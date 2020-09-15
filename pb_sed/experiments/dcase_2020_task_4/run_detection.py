@@ -184,8 +184,12 @@ def main(
                         if k != i:
                             continue
                         label = labels[k]
-                        onset = (stft.stft_frame_index_to_center_index(onset) + stft.window_length / 2) / sr
-                        offset = (stft.stft_frame_index_to_center_index(offset - 1) + stft.window_length / 2) / sr
+                        onset = stft.frame_index_to_sample_index(
+                            onset, mode='center'
+                        ) / sr
+                        offset = stft.frame_index_to_sample_index(
+                            offset - 1, mode='center'
+                        ) / sr
                         fid.write(f'{example_id}.wav\t{onset}\t{offset}\t{label}\n')
 
     cnn_detection_score_mat = None
