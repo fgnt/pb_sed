@@ -15,7 +15,7 @@ from sacred import Experiment as Exp
 from sacred.commands import print_config
 from sacred.observers import FileStorageObserver
 
-ex_name = 'dcase_2020_tag_conditioned_cnn'
+ex_name = 'dcase_2020_cnn'
 ex = Exp(ex_name)
 
 
@@ -24,34 +24,25 @@ def config():
     debug = False
 
     # Data configuration
-    repetitions = {
-        'desed_real_weak_pseudo_strong_2020-07-04-22-16-46': 0,
-        'desed_real_weak_pseudo_strong_2020-09-06-13-10-05': 0,
-        'desed_real_weak_pseudo_strong_2020-09-06-13-10-19': 0,
-        'desed_real_weak_pseudo_strong_2020-09-06-13-10-33': 0,
-        'desed_real_weak_pseudo_strong_2020-09-07-14-40-09': 0,
-        'desed_real_weak_pseudo_strong_2020-09-06-13-12-06': 0,
-        'desed_real_unlabel_in_domain_pseudo_strong_2020-07-04-22-33-13': 0,
-        'desed_real_unlabel_in_domain_pseudo_strong_2020-09-06-13-28-33': 0,
-        'desed_real_unlabel_in_domain_pseudo_strong_2020-09-06-13-28-54': 0,
-        'desed_real_unlabel_in_domain_pseudo_strong_2020-09-06-13-28-52': 0,
-        'desed_real_unlabel_in_domain_pseudo_strong_2020-09-07-15-09-15': 0,
-        'desed_real_unlabel_in_domain_pseudo_strong_2020-09-06-13-29-11': 0,
+    desed_real_weak_pseudo_strong_timestamp = ''
+    assert len(desed_real_weak_pseudo_strong_timestamp) > 0, 'Set desed_real_weak_pseudo_strong_timestamp on the command line.'
+    desed_real_weak_pseudo_strong = \
+        f'desed_real_weak_pseudo_strong_{desed_real_weak_pseudo_strong_timestamp}'
+    desed_real_unlabel_in_domain_pseudo_strong_timestamp = ''
+    assert len(desed_real_unlabel_in_domain_pseudo_strong_timestamp) > 0, 'Set desed_real_unlabel_in_domain_pseudo_strong_timestamp on the command line.'
+    desed_real_unlabel_in_domain_pseudo_strong = \
+        f'desed_real_unlabel_in_domain_pseudo_strong_{desed_real_unlabel_in_domain_pseudo_strong_timestamp}'
+
+    dataset_repetitions = {
+        desed_real_weak_pseudo_strong: 10,
         'desed_synthetic': 2,
+        desed_real_unlabel_in_domain_pseudo_strong: 1,
     }
     audio_reader = {
         'source_sample_rate': None,
         'target_sample_rate': 16000,
     }
-    cached_datasets = [] if debug else [
-        'desed_real_weak_pseudo_strong_2020-07-04-22-16-46',
-        'desed_real_weak_pseudo_strong_2020-09-06-13-10-05',
-        'desed_real_weak_pseudo_strong_2020-09-06-13-10-19',
-        'desed_real_weak_pseudo_strong_2020-09-06-13-10-33',
-        'desed_real_weak_pseudo_strong_2020-09-07-14-40-09',
-        'desed_real_weak_pseudo_strong_2020-09-06-13-12-06',
-        'desed_synthetic',
-    ]
+    cached_datasets = [] if debug else ['desed_synthetic', desed_real_weak_pseudo_strong]
     stft = {
         'shift': 320,
         'window_length': 960,
@@ -64,19 +55,8 @@ def config():
     max_mixup_length = int(12.*audio_reader['target_sample_rate']/stft['shift']) + 1
     batch_size = 24
     min_examples = {
-        'desed_real_weak_pseudo_strong_2020-07-04-22-16-46': 0,
-        'desed_real_weak_pseudo_strong_2020-09-06-13-10-05': 0,
-        'desed_real_weak_pseudo_strong_2020-09-06-13-10-19': 0,
-        'desed_real_weak_pseudo_strong_2020-09-06-13-10-33': 0,
-        'desed_real_weak_pseudo_strong_2020-09-07-14-40-09': 0,
-        'desed_real_weak_pseudo_strong_2020-09-06-13-12-06': 0,
-        'desed_real_unlabel_in_domain_pseudo_strong_2020-07-04-22-33-13': 0,
-        'desed_real_unlabel_in_domain_pseudo_strong_2020-09-06-13-28-33': 0,
-        'desed_real_unlabel_in_domain_pseudo_strong_2020-09-06-13-28-54': 0,
-        'desed_real_unlabel_in_domain_pseudo_strong_2020-09-06-13-28-52': 0,
-        'desed_real_unlabel_in_domain_pseudo_strong_2020-09-07-15-09-15': 0,
-        'desed_real_unlabel_in_domain_pseudo_strong_2020-09-06-13-29-11': 0,
-        'desed_synthetic': 0,
+        **{ds: 0 for ds in dataset_repetitions},
+        desed_real_weak_pseudo_strong: int(batch_size/3),
     }
     num_workers = 8
     prefetch_buffer = 10 * batch_size
@@ -156,7 +136,7 @@ def config():
 @ex.automain
 def train(
         _run,
-        repetitions, audio_reader, cached_datasets, stft,
+        dataset_repetitions, audio_reader, cached_datasets, stft,
         mixup_probs, max_mixup_length,
         num_workers, prefetch_buffer,
         batch_size, max_padding_rate, bucket_expiration, min_examples,
@@ -168,7 +148,7 @@ def train(
     trainer = Trainer.from_config(trainer)
 
     train_iter = data.get_train(
-        repetitions=repetitions,
+        dataset_repetitions=dataset_repetitions,
         audio_reader=audio_reader, stft=stft,
         mixup_probs=mixup_probs, max_mixup_length=max_mixup_length,
         num_workers=num_workers, prefetch_buffer=prefetch_buffer,

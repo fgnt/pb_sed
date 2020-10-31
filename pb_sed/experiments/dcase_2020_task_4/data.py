@@ -1,4 +1,5 @@
 from pathlib import Path
+from copy import copy
 
 import lazy_dataset
 import numpy as np
@@ -15,21 +16,18 @@ db = DESED()
 
 
 def get_train(
+        dataset_repetitions,
         audio_reader, stft,
         num_workers, prefetch_buffer,
         batch_size, max_padding_rate, bucket_expiration,
         storage_dir,
         add_alignment=False,
-        repetitions=None,
         mixup_probs=(1/3, 2/3), max_mixup_length=None,
         min_examples=None,
         cached_datasets=None,
+        unlabeled=False,
+        max_chunk_len=None, chunk_overlap=0,
 ):
-    if repetitions is None:
-        repetitions = {
-            'desed_real_weak': 5,
-            'desed_synthetic': 1,
-        }
 
     def maybe_remove_start_stop_times(example):
         if not add_alignment:
@@ -51,13 +49,13 @@ def get_train(
                 cached_datasets is not None and name in cached_datasets
             )
         ).map(maybe_remove_start_stop_times).map(random_scale)
-        for name in repetitions if repetitions[name] > 0
+        for name in dataset_repetitions if dataset_repetitions[name] > 0
     }
 
     # interleave
     training_set = lazy_dataset.intersperse(
         *[
-            ds.shuffle(reshuffle=True).tile(repetitions[name])
+            ds.shuffle(reshuffle=True).tile(dataset_repetitions[name])
             for name, ds in datasets.items()
         ]
     )
@@ -72,9 +70,13 @@ def get_train(
         bucket_expiration=bucket_expiration,
         min_examples=min_examples,
         add_alignment=add_alignment,
-        training=True,
+        local_shuffle=True,
+        drop_incomplete=True,
         mixup_probs=mixup_probs,
         max_mixup_length=max_mixup_length,
+        unlabeled=unlabeled,
+        max_chunk_len=max_chunk_len,
+        chunk_overlap=chunk_overlap,
     )
 
 
@@ -103,7 +105,7 @@ def get_dataset(name, audio_reader, cache=False):
 
         ds = ds.map(load_data)
         if cache:
-            ds = ds.cache(lazy=False)
+            ds = ds.cache(lazy=False).map(lambda ex: copy(ex))
 
         rooms = db.get_dataset('rir_data_train')
 
@@ -129,7 +131,7 @@ def get_dataset(name, audio_reader, cache=False):
     else:
         ds = ds.map(audio_reader)
         if cache:
-            ds = ds.cache(lazy=False)
+            ds = ds.cache(lazy=False).map(lambda ex: copy(ex))
 
     def normalize(example):
         example['audio_data'] -= example['audio_data'].mean(-1, keepdims=True)
@@ -145,12 +147,13 @@ def prepare_dataset(
         audio_reader, stft,
         num_workers, prefetch_buffer,
         batch_size, max_padding_rate, bucket_expiration,
-        training=False,
         unlabeled=False,
         add_alignment=False,
-        mixup_probs=(0., 1.), max_mixup_length=None,
+        local_shuffle=False,
+        drop_incomplete=False,
+        mixup_probs=(1., 0.), max_mixup_length=None, min_mixup_overlap=.5,
         min_examples=None,
-        max_chunk_length=None, chunk_overlap=0,
+        max_chunk_len=None, chunk_overlap=0,
 ):
 
     stft = STFT(**stft)
@@ -183,21 +186,21 @@ def prepare_dataset(
             example_['events'] = example['events'].T.astype(np.float32)
         if "events_alignment" in example:
             example_["events_alignment"] = example['events_alignment'].T.astype(np.float32)
-        if max_chunk_length is not None and example_['seq_len'] > max_chunk_length:
+        if max_chunk_len is not None and example_['seq_len'] > max_chunk_len:
+            # print('.')
+            n = int(np.ceil((example_['seq_len']-chunk_overlap) / (max_chunk_len - chunk_overlap)))
+            chunk_len = (example_['seq_len']-chunk_overlap) / n + chunk_overlap
             examples = []
-            for onset in range(
-                0, example_['seq_len'], max_chunk_length - chunk_overlap
-            ):
-                stft_chunk = example_['stft'][:, onset:onset + max_chunk_length]
+            for onset in np.arange(0, example_['seq_len']-chunk_overlap, chunk_len - chunk_overlap):
+                stft_chunk = example_['stft'][:, int(onset):int(onset + chunk_len)]
                 chunk = {
                     'example_id': f'{example_["example_id"]}_!chunk!_{onset}',
                     'stft': stft_chunk,
                     'seq_len': stft_chunk.shape[1],
-                    'events': example['events'].astype(np.float32),
                     'dataset': example['dataset'],
                 }
                 if "events_alignment" in example_:
-                    chunk["events_alignment"] = example_['events_alignment'][onset:onset + max_chunk_length]
+                    chunk["events_alignment"] = example_['events_alignment'][int(onset):int(onset + chunk_len)]
                     chunk["events"] = chunk["events_alignment"].max(0)
                 examples.append(chunk)
             return examples
@@ -205,24 +208,30 @@ def prepare_dataset(
 
     dataset = dataset.map(finalize)\
         .prefetch(num_workers, prefetch_buffer, catch_filter_exception=True).unbatch()
-    if training and mixup_probs[0] < 1.:
+
+    if local_shuffle and max_chunk_len is not None:
+        print('Shuffle')
+        dataset = dataset.shuffle(reshuffle=True, buffer_size=80*batch_size)
+
+    if mixup_probs[0] < 1.:
+        print('Mixup')
         dataset = MixUpDataset(
             dataset,
             sample_fn=SampleMixupComponents(mixup_probs),
-            mixup_fn=SuperposeEvents(min_overlap=.5, max_length=max_mixup_length),
-            buffer_size=100*batch_size,
+            mixup_fn=SuperposeEvents(min_overlap=min_mixup_overlap, max_length=max_mixup_length),
+            buffer_size=80*batch_size,
         )
     if min_examples is None:
         return dataset.batch_dynamic_time_series_bucket(
             batch_size=batch_size, len_key="seq_len",
             max_padding_rate=max_padding_rate, expiration=bucket_expiration,
-            drop_incomplete=training, sort_key="seq_len", reverse_sort=True
+            drop_incomplete=drop_incomplete, sort_key="seq_len", reverse_sort=True
         ).map(Collate())
     return dataset.batch_dynamic_bucket(
         bucket_cls=DatasetBalancedTimeSeriesBucket, min_examples=min_examples,
         batch_size=batch_size, len_key="seq_len",
         max_padding_rate=max_padding_rate, expiration=bucket_expiration,
-        drop_incomplete=training, sort_key="seq_len", reverse_sort=True
+        drop_incomplete=drop_incomplete, sort_key="seq_len", reverse_sort=True
     ).map(Collate())
 
 

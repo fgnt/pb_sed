@@ -16,7 +16,7 @@ from sacred import Experiment as Exp
 from sacred.commands import print_config
 from sacred.observers import FileStorageObserver
 
-ex_name = 'dcase_2020_fbcrnn'
+ex_name = 'dcase_2020_crnn'
 ex = Exp(ex_name)
 
 
@@ -25,14 +25,8 @@ def config():
     debug = False
 
     # Data configuration
-    repetitions = {
+    dataset_repetitions = {
         'desed_real_weak': 10,
-        'desed_real_unlabel_in_domain_pseudo_weak_2020-07-03-22-27-00': 0,
-        'desed_real_unlabel_in_domain_pseudo_weak_2020-09-03-20-48-45': 0,
-        'desed_real_unlabel_in_domain_pseudo_weak_2020-09-03-20-49-48': 0,
-        'desed_real_unlabel_in_domain_pseudo_weak_2020-09-03-20-52-19': 0,
-        'desed_real_unlabel_in_domain_pseudo_weak_2020-09-03-21-00-48': 0,
-        'desed_real_unlabel_in_domain_pseudo_weak_2020-09-03-21-05-34': 0,
         'desed_synthetic': 2,
     }
     audio_reader = {
@@ -52,14 +46,8 @@ def config():
     max_mixup_length = int(15.*audio_reader['target_sample_rate']/stft['shift'])+1
     batch_size = 16
     min_examples = {
+        **{ds: 0 for ds in dataset_repetitions},
         'desed_real_weak': int(batch_size/3),
-        'desed_real_unlabel_in_domain_pseudo_weak_2020-07-03-22-27-00': 0,
-        'desed_real_unlabel_in_domain_pseudo_weak_2020-09-03-20-48-45': 0,
-        'desed_real_unlabel_in_domain_pseudo_weak_2020-09-03-20-49-48': 0,
-        'desed_real_unlabel_in_domain_pseudo_weak_2020-09-03-20-52-19': 0,
-        'desed_real_unlabel_in_domain_pseudo_weak_2020-09-03-21-00-48': 0,
-        'desed_real_unlabel_in_domain_pseudo_weak_2020-09-03-21-05-34': 0,
-        'desed_synthetic': 0,
     }
     num_workers = 8
     prefetch_buffer = 10 * batch_size
@@ -155,7 +143,7 @@ def config():
 @ex.automain
 def train(
         _run,
-        repetitions, audio_reader, cached_datasets, stft,
+        dataset_repetitions, audio_reader, cached_datasets, stft,
         mixup_probs, max_mixup_length,
         num_workers, prefetch_buffer,
         batch_size, max_padding_rate, bucket_expiration, min_examples,
@@ -184,7 +172,7 @@ def train(
             param.requires_grad = False
 
     train_iter = data.get_train(
-        repetitions=repetitions,
+        dataset_repetitions=dataset_repetitions,
         audio_reader=audio_reader, stft=stft,
         mixup_probs=mixup_probs, max_mixup_length=max_mixup_length,
         num_workers=num_workers, prefetch_buffer=prefetch_buffer,
