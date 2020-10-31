@@ -7,7 +7,7 @@ from paderbox.utils.timer import timeStamped
 from padercontrib.evaluation.event_detection import fscore
 from padertorch.data import example_to_device
 from pb_sed.experiments.dcase_2020_task_4 import data
-from pb_sed.models.fbcrnn import FBCRNN
+from pb_sed.models.crnn import CRNN
 from pb_sed.paths import storage_root
 from sacred import Experiment as Exp
 from sacred.observers import FileStorageObserver
@@ -70,7 +70,7 @@ def main(
     target_mat = None
     example_ids = []
     for exp_dir, checkpoint in zip(crnn_dirs, crnn_checkpoints):
-        crnn: FBCRNN = FBCRNN.from_storage_dir(
+        crnn: CRNN = CRNN.from_storage_dir(
             storage_dir=exp_dir, config_name='1/config.json',
             checkpoint_name=checkpoint
         )

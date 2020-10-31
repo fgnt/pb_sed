@@ -12,9 +12,9 @@ from torch import nn
 from torchvision.utils import make_grid
 
 
-class FBCRNN(Model):
+class CRNN(Model):
     """
-    >>> config = FBCRNN.get_config({\
+    >>> config = CRNN.get_config({\
             'cnn_2d': {'out_channels':[32,32,32], 'kernel_size': 3},\
             'cnn_1d': {'out_channels':[32,32], 'kernel_size': 3},\
             'rnn_fwd': {'hidden_size': 64},\
@@ -25,7 +25,7 @@ class FBCRNN(Model):
                 'n_mels': 80,\
             },\
         })
-    >>> crnn = FBCRNN.from_config(config)
+    >>> crnn = CRNN.from_config(config)
     >>> inputs = {'stft': torch.randn((4, 1, 15, 257, 2)), 'seq_len': [15, 14, 13, 12], 'events': torch.zeros((4,10))}
     >>> outputs = crnn(inputs)
     >>> outputs[0][0].shape
@@ -35,7 +35,7 @@ class FBCRNN(Model):
     def __init__(
             self, feature_extractor, cnn_2d, cnn_1d,
             rnn_fwd, clf_fwd, rnn_bwd, clf_bwd, *,
-            framewise_training=True, freeze_cnns=False
+            framewise_training=True,
     ):
         super().__init__()
         self.feature_extractor = feature_extractor
@@ -46,15 +46,10 @@ class FBCRNN(Model):
         self._rnn_bwd = rnn_bwd
         self._clf_bwd = clf_bwd
         self.framewise_training = framewise_training
-        self.freeze_cnns = freeze_cnns
 
     def cnn_2d(self, x, seq_len=None):
         if self._cnn_2d is not None:
-            if self.freeze_cnns:
-                with torch.no_grad():
-                    x, seq_len = self._cnn_2d(x, seq_len)
-            else:
-                x, seq_len = self._cnn_2d(x, seq_len)
+            x, seq_len = self._cnn_2d(x, seq_len)
         if x.dim() != 3:
             assert x.dim() == 4, x.shape
             x = rearrange(x, 'b c f t -> b (c f) t')
@@ -62,11 +57,7 @@ class FBCRNN(Model):
 
     def cnn_1d(self, x, seq_len=None):
         if self._cnn_1d is not None:
-            if self.freeze_cnns:
-                with torch.no_grad():
-                    x, seq_len = self._cnn_1d(x, seq_len)
-            else:
-                x, seq_len = self._cnn_1d(x, seq_len)
+            x, seq_len = self._cnn_1d(x, seq_len)
         return x, seq_len
 
     def fwd_classification(self, x, seq_len=None):

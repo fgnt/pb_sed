@@ -9,9 +9,9 @@ from torch import nn
 from torchvision.utils import make_grid
 
 
-class TagConditionedCNN(Model):
+class CNN(Model):
     """
-    >>> config = TagConditionedCNN.get_config({\
+    >>> config = CNN.get_config({\
             'tag_conditioning': True,\
             'cnn_2d': {'out_channels':[32,32,32], 'kernel_size': 3},\
             'cnn_1d': {'out_channels':[32,10], 'kernel_size': 3},\
@@ -20,9 +20,9 @@ class TagConditionedCNN(Model):
                 'fft_length': 512,\
                 'n_mels': 80,\
             },\
-            'wrong_tag_probs': 10*[.1],\
+            'false_tag_probs': 10*[.1],\
         })
-    >>> sed = TagConditionedCNN.from_config(config)
+    >>> sed = CNN.from_config(config)
     >>> inputs = {'stft': torch.randn((4, 1, 5, 257, 2)), 'seq_len': [5,4,3,2], 'events': torch.zeros((4,10)), 'events_alignment': torch.Tensor([0,1,1,0,0])+torch.zeros((4,10,5))}
     >>> outputs = sed(inputs)
     >>> outputs[0][0].shape

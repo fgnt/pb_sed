@@ -9,13 +9,13 @@ from padertorch.train.hooks import LRAnnealingHook
 from padertorch.train.optimizer import Adam
 from padertorch.train.trainer import Trainer
 from pb_sed.experiments.dcase_2020_task_4 import data
-from pb_sed.models.fbcrnn import FBCRNN
+from pb_sed.models.cnn import CNN
 from pb_sed.paths import storage_root
 from sacred import Experiment as Exp
 from sacred.commands import print_config
 from sacred.observers import FileStorageObserver
 
-ex_name = 'dcase_2020_fbcrnn'
+ex_name = 'dcase_2020_tag_conditioned_cnn'
 ex = Exp(ex_name)
 
 
@@ -25,15 +25,33 @@ def config():
 
     # Data configuration
     repetitions = {
-        'desed_real_weak': 10,
-        'desed_real_unlabel_in_domain_pseudo_weak_2020-07-03-22-27-00': 1,
+        'desed_real_weak_pseudo_strong_2020-07-04-22-16-46': 0,
+        'desed_real_weak_pseudo_strong_2020-09-06-13-10-05': 0,
+        'desed_real_weak_pseudo_strong_2020-09-06-13-10-19': 0,
+        'desed_real_weak_pseudo_strong_2020-09-06-13-10-33': 0,
+        'desed_real_weak_pseudo_strong_2020-09-07-14-40-09': 0,
+        'desed_real_weak_pseudo_strong_2020-09-06-13-12-06': 0,
+        'desed_real_unlabel_in_domain_pseudo_strong_2020-07-04-22-33-13': 0,
+        'desed_real_unlabel_in_domain_pseudo_strong_2020-09-06-13-28-33': 0,
+        'desed_real_unlabel_in_domain_pseudo_strong_2020-09-06-13-28-54': 0,
+        'desed_real_unlabel_in_domain_pseudo_strong_2020-09-06-13-28-52': 0,
+        'desed_real_unlabel_in_domain_pseudo_strong_2020-09-07-15-09-15': 0,
+        'desed_real_unlabel_in_domain_pseudo_strong_2020-09-06-13-29-11': 0,
         'desed_synthetic': 2,
     }
     audio_reader = {
         'source_sample_rate': None,
         'target_sample_rate': 16000,
     }
-    cached_datasets = [] if debug else ['desed_real_weak', 'desed_synthetic']
+    cached_datasets = [] if debug else [
+        'desed_real_weak_pseudo_strong_2020-07-04-22-16-46',
+        'desed_real_weak_pseudo_strong_2020-09-06-13-10-05',
+        'desed_real_weak_pseudo_strong_2020-09-06-13-10-19',
+        'desed_real_weak_pseudo_strong_2020-09-06-13-10-33',
+        'desed_real_weak_pseudo_strong_2020-09-07-14-40-09',
+        'desed_real_weak_pseudo_strong_2020-09-06-13-12-06',
+        'desed_synthetic',
+    ]
     stft = {
         'shift': 320,
         'window_length': 960,
@@ -42,12 +60,22 @@ def config():
         'pad': False,
     }
 
-    mixup_probs = (1/3, 2/3)
-    max_mixup_length = int(15.*audio_reader['target_sample_rate']/stft['shift'])+1
-    batch_size = 16
+    mixup_probs = (.5, .5)
+    max_mixup_length = int(12.*audio_reader['target_sample_rate']/stft['shift']) + 1
+    batch_size = 24
     min_examples = {
-        'desed_real_weak': int(batch_size/3),
-        'desed_real_unlabel_in_domain_pseudo_weak_2020-07-03-22-27-00': 0,
+        'desed_real_weak_pseudo_strong_2020-07-04-22-16-46': 0,
+        'desed_real_weak_pseudo_strong_2020-09-06-13-10-05': 0,
+        'desed_real_weak_pseudo_strong_2020-09-06-13-10-19': 0,
+        'desed_real_weak_pseudo_strong_2020-09-06-13-10-33': 0,
+        'desed_real_weak_pseudo_strong_2020-09-07-14-40-09': 0,
+        'desed_real_weak_pseudo_strong_2020-09-06-13-12-06': 0,
+        'desed_real_unlabel_in_domain_pseudo_strong_2020-07-04-22-33-13': 0,
+        'desed_real_unlabel_in_domain_pseudo_strong_2020-09-06-13-28-33': 0,
+        'desed_real_unlabel_in_domain_pseudo_strong_2020-09-06-13-28-54': 0,
+        'desed_real_unlabel_in_domain_pseudo_strong_2020-09-06-13-28-52': 0,
+        'desed_real_unlabel_in_domain_pseudo_strong_2020-09-07-15-09-15': 0,
+        'desed_real_unlabel_in_domain_pseudo_strong_2020-09-06-13-29-11': 0,
         'desed_synthetic': 0,
     }
     num_workers = 8
@@ -60,7 +88,8 @@ def config():
     subdir = str(Path(ex_name) / timeStamped('')[1:])
     trainer = {
         'model': {
-            'factory':  FBCRNN,
+            'factory':  CNN,
+            'tag_conditioning': True,
             'feature_extractor': {
                 'sample_rate': audio_reader['target_sample_rate'],
                 'fft_length': stft['size'],
@@ -80,7 +109,7 @@ def config():
                 },
                 'max_resample_rate': 1.,
                 'blur_sigma': .5,
-                'n_time_masks': 1,
+                'n_time_masks': 0,
                 'max_masked_time_steps': 70,
                 'max_masked_time_rate': .2,
                 'n_mel_masks': 1,
@@ -98,21 +127,8 @@ def config():
                 'dropout': .0,
             },
             'cnn_1d': {
-                'out_channels': 3*[256],
-                'output_layer': False,
+                'out_channels': 2*[256] + [10],
                 'kernel_size': 3,
-                'norm': 'batch',
-                'activation_fn': 'relu',
-                'dropout': .0,
-            },
-            'rnn_fwd': {
-                'hidden_size': 256,
-                'num_layers': 2,
-                'dropout': .0,
-            },
-            'clf_fwd': {
-                'out_channels': [256, 10],
-                'kernel_size': 1,
                 'norm': 'batch',
                 'activation_fn': 'relu',
                 'dropout': .0,
@@ -159,6 +175,7 @@ def train(
         batch_size=batch_size, max_padding_rate=max_padding_rate,
         bucket_expiration=bucket_expiration, min_examples=min_examples,
         storage_dir=trainer.storage_dir,
+        add_alignment=True,
         cached_datasets=cached_datasets,
     )
     validation_set = data.get_dataset(
@@ -171,6 +188,7 @@ def train(
         num_workers=num_workers, prefetch_buffer=prefetch_buffer,
         batch_size=batch_size, max_padding_rate=max_padding_rate,
         bucket_expiration=bucket_expiration,
+        add_alignment=True,
     )
 
     trainer.test_run(train_iter, validation_iter)

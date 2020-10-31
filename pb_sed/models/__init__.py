@@ -1,2 +1,2 @@
-from .fbcrnn import FBCRNN
-from .tag_conditioned_cnn import TagConditionedCNN
+from .crnn import CRNN
+from .cnn import CNN

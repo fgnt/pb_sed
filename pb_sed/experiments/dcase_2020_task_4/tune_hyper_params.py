@@ -10,8 +10,8 @@ from padertorch.contrib.je.data.transforms import Collate
 from padertorch.data import example_to_device
 from pb_sed.evaluation import instance_based, event_based
 from pb_sed.experiments.dcase_2020_task_4 import data
-from pb_sed.models.fbcrnn import FBCRNN
-from pb_sed.models.tag_conditioned_cnn import TagConditionedCNN
+from pb_sed.models.crnn import CRNN
+from pb_sed.models.cnn import CNN
 from pb_sed.paths import storage_root
 from pb_sed.utils import medfilt
 from sacred import Experiment as Exp
@@ -83,7 +83,7 @@ def main(
     tagging_score_mat = []
     tagging_target_mat = None
     for exp_dir, crnn_checkpoint in zip(crnn_dirs, crnn_checkpoints):
-        crnn: FBCRNN = FBCRNN.from_storage_dir(
+        crnn: CRNN = CRNN.from_storage_dir(
             storage_dir=exp_dir, config_name='1/config.json',
             checkpoint_name=crnn_checkpoint
         )
@@ -212,7 +212,7 @@ def main(
         assert len(cnn_dirs) > 0
         cnn_detection_score_mat = []
         for exp_dir, cnn_checkpoint in zip(cnn_dirs, cnn_checkpoints):
-            cnn: TagConditionedCNN = TagConditionedCNN.from_storage_dir(
+            cnn: CNN = CNN.from_storage_dir(
                 storage_dir=exp_dir, config_name='1/config.json',
                 checkpoint_name=cnn_checkpoint
             )

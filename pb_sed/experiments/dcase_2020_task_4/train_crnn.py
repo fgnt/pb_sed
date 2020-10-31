@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import numpy as np
+import torch
 from paderbox.utils.timer import timeStamped
 from padertorch.contrib.je.modules.augment import (
     MelWarping, LogTruncNormalSampler, TruncExponentialSampler
@@ -9,13 +10,13 @@ from padertorch.train.hooks import LRAnnealingHook
 from padertorch.train.optimizer import Adam
 from padertorch.train.trainer import Trainer
 from pb_sed.experiments.dcase_2020_task_4 import data
-from pb_sed.models.tag_conditioned_cnn import TagConditionedCNN
+from pb_sed.models.crnn import CRNN
 from pb_sed.paths import storage_root
 from sacred import Experiment as Exp
 from sacred.commands import print_config
 from sacred.observers import FileStorageObserver
 
-ex_name = 'dcase_2020_tag_conditioned_cnn'
+ex_name = 'dcase_2020_fbcrnn'
 ex = Exp(ex_name)
 
 
@@ -25,18 +26,20 @@ def config():
 
     # Data configuration
     repetitions = {
-        'desed_real_weak_pseudo_strong_2020-07-04-22-16-46': 10,
-        'desed_real_unlabel_in_domain_pseudo_strong_2020-07-04-22-33-13': 1,
+        'desed_real_weak': 10,
+        'desed_real_unlabel_in_domain_pseudo_weak_2020-07-03-22-27-00': 0,
+        'desed_real_unlabel_in_domain_pseudo_weak_2020-09-03-20-48-45': 0,
+        'desed_real_unlabel_in_domain_pseudo_weak_2020-09-03-20-49-48': 0,
+        'desed_real_unlabel_in_domain_pseudo_weak_2020-09-03-20-52-19': 0,
+        'desed_real_unlabel_in_domain_pseudo_weak_2020-09-03-21-00-48': 0,
+        'desed_real_unlabel_in_domain_pseudo_weak_2020-09-03-21-05-34': 0,
         'desed_synthetic': 2,
     }
     audio_reader = {
         'source_sample_rate': None,
         'target_sample_rate': 16000,
     }
-    cached_datasets = [] if debug else [
-        'desed_real_weak_pseudo_strong_2020-07-04-22-16-46',
-        'desed_synthetic',
-    ]
+    cached_datasets = [] if debug else ['desed_real_weak', 'desed_synthetic']
     stft = {
         'shift': 320,
         'window_length': 960,
@@ -45,12 +48,17 @@ def config():
         'pad': False,
     }
 
-    mixup_probs = (.5, .5)
-    max_mixup_length = int(12.*audio_reader['target_sample_rate']/stft['shift']) + 1
-    batch_size = 24
+    mixup_probs = (1/3, 2/3)
+    max_mixup_length = int(15.*audio_reader['target_sample_rate']/stft['shift'])+1
+    batch_size = 16
     min_examples = {
-        'desed_real_weak_pseudo_strong_2020-07-04-22-16-46': int(batch_size/3),
-        'desed_real_unlabel_in_domain_pseudo_strong_2020-07-04-22-33-13': 0,
+        'desed_real_weak': int(batch_size/3),
+        'desed_real_unlabel_in_domain_pseudo_weak_2020-07-03-22-27-00': 0,
+        'desed_real_unlabel_in_domain_pseudo_weak_2020-09-03-20-48-45': 0,
+        'desed_real_unlabel_in_domain_pseudo_weak_2020-09-03-20-49-48': 0,
+        'desed_real_unlabel_in_domain_pseudo_weak_2020-09-03-20-52-19': 0,
+        'desed_real_unlabel_in_domain_pseudo_weak_2020-09-03-21-00-48': 0,
+        'desed_real_unlabel_in_domain_pseudo_weak_2020-09-03-21-05-34': 0,
         'desed_synthetic': 0,
     }
     num_workers = 8
@@ -63,8 +71,7 @@ def config():
     subdir = str(Path(ex_name) / timeStamped('')[1:])
     trainer = {
         'model': {
-            'factory':  TagConditionedCNN,
-            'tag_conditioning': True,
+            'factory':  CRNN,
             'feature_extractor': {
                 'sample_rate': audio_reader['target_sample_rate'],
                 'fft_length': stft['size'],
@@ -84,7 +91,7 @@ def config():
                 },
                 'max_resample_rate': 1.,
                 'blur_sigma': .5,
-                'n_time_masks': 0,
+                'n_time_masks': 1,
                 'max_masked_time_steps': 70,
                 'max_masked_time_rate': .2,
                 'n_mel_masks': 1,
@@ -96,14 +103,27 @@ def config():
                 'out_channels': [16, 16, 32, 32, 64, 64, 128, 128, 256],
                 'pool_size': [1, (2, 1), 1, (2, 1), 1, (2, 1), 1, (2, 1), (2, 1)],
                 'output_layer': False,
-                'kernel_size': 3,
+                'kernel_size': [3, (3, 1), 3, (3, 1), 3, (3, 1), 3, (3, 1), (3, 1)],
                 'norm': 'batch',
                 'activation_fn': 'relu',
                 'dropout': .0,
             },
             'cnn_1d': {
-                'out_channels': 2*[256] + [10],
+                'out_channels': 3*[256],
+                'output_layer': False,
                 'kernel_size': 3,
+                'norm': 'batch',
+                'activation_fn': 'relu',
+                'dropout': .0,
+            },
+            'rnn_fwd': {
+                'hidden_size': 256,
+                'num_layers': 2,
+                'dropout': .0,
+            },
+            'clf_fwd': {
+                'out_channels': [256, 10],
+                'kernel_size': 1,
                 'norm': 'batch',
                 'activation_fn': 'relu',
                 'dropout': .0,
@@ -120,6 +140,10 @@ def config():
         'checkpoint_trigger': (1000, 'iteration'),
         'stop_trigger': (40000, 'iteration')
     }
+    cnn_2d_init = None
+    freeze_cnn_2d = False
+    cnn_1d_init = None
+    freeze_cnn_1d = False
     Trainer.get_config(trainer)
     resume = False
     rampup_steps = 1000
@@ -136,11 +160,28 @@ def train(
         num_workers, prefetch_buffer,
         batch_size, max_padding_rate, bucket_expiration, min_examples,
         rampup_steps, lr_decay_step,
-        trainer, resume,
+        trainer, cnn_2d_init, freeze_cnn_2d, cnn_1d_init, freeze_cnn_1d,
+        resume,
 ):
 
     print_config(_run)
     trainer = Trainer.from_config(trainer)
+    if cnn_2d_init is not None:
+        print('Load cnn_2d params')
+        state_dict = torch.load(cnn_2d_init, map_location='cpu')
+        trainer.model._cnn_2d.load_state_dict(state_dict)
+    if freeze_cnn_2d:
+        print('Freeze cnn_2d params')
+        for param in trainer.model._cnn_2d.parameters():
+            param.requires_grad = False
+    if cnn_1d_init is not None:
+        print('Load cnn_1d params')
+        state_dict = torch.load(cnn_1d_init, map_location='cpu')
+        trainer.model._cnn_1d.load_state_dict(state_dict)
+    if freeze_cnn_1d:
+        print('Freeze cnn_1d params')
+        for param in trainer.model._cnn_1d.parameters():
+            param.requires_grad = False
 
     train_iter = data.get_train(
         repetitions=repetitions,
@@ -150,7 +191,6 @@ def train(
         batch_size=batch_size, max_padding_rate=max_padding_rate,
         bucket_expiration=bucket_expiration, min_examples=min_examples,
         storage_dir=trainer.storage_dir,
-        add_alignment=True,
         cached_datasets=cached_datasets,
     )
     validation_set = data.get_dataset(
@@ -163,7 +203,6 @@ def train(
         num_workers=num_workers, prefetch_buffer=prefetch_buffer,
         batch_size=batch_size, max_padding_rate=max_padding_rate,
         bucket_expiration=bucket_expiration,
-        add_alignment=True,
     )
 
     trainer.test_run(train_iter, validation_iter)
