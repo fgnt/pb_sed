@@ -1,3 +1,13 @@
+"""data preparation functions
+
+We use the lazy_dataset package to perform data loading and transformation.
+See https://github.com/fgnt/lazy_dataset for more information aboutlazy_dataset.
+
+Note that we here only load and normalize waveforms and extract STFTs, while
+log mel-band energy extraction and normalization is performed in the pytorch models.
+Similarly we here only perform random scaling of waveforms and mixup at
+STFT-level, while other data augmentations are performed in the pytorch models.
+"""
 from pathlib import Path
 from copy import copy
 
@@ -28,7 +38,46 @@ def get_train(
         unlabeled=False,
         max_chunk_len=None, chunk_overlap=0,
 ):
+    """prepare dataset
 
+    Args:
+        dataset_repetitions: dict with dataset names as keys and an integer
+            value indicating the number of repetitions to balance the datasets
+        audio_reader: AudioReader kwargs
+        stft: STFT kwargs
+        num_workers: number of workers used in prefetching
+        prefetch_buffer: number of batches to be prefetched
+        batch_size:
+        max_padding_rate: maximum amount of padding allowed. Determines which
+            clips can be joined to a batch (see lazy_dataset.DynamicTimeSeriesBucket)
+        bucket_expiration: maximum number of examples to wait for a bucket to
+            complete (see lazy_dataset.DynamicTimeSeriesBucket)
+        storage_dir: location to store event label mapping
+        add_alignment: whether frame-level labels should be added to example
+            dicts
+        mixup_probs: probabilities for the number of components in a mixture
+            (superpposition in our case). E.g., for mixup_prob=(1,) no mixup is
+            performed and for mixup_prob=(.5,.5) no mixup is performed with a
+            probability of .5 and mixup of two clips is performed with a
+            probability of .5 .
+        max_mixup_length: In our mixup implementation audio clips may be
+            shifted to each other before superposition. max_mixup_length limits
+            the shift such that the superposition is not longer than
+            max_mixup_length frames.
+        min_examples: a dict with dataset names as keys and an integer value
+            indicating the minimum number of examples from a dataset in each
+            batch.
+        cached_datasets: list of dataset_names to be cached in memory.
+        unlabeled: whether to discard all labels
+        max_chunk_len: the maximum number of frames allowed in a clip. Clips
+            exceeding max_chunk_len will be split into chunks.
+        chunk_overlap: overlap rate of adjacent chunks
+
+    Returns:
+        dataset: lazy_dataset (iteratable) lazily loading example dicts
+            containing an stft plus meta data.
+
+    """
     def maybe_remove_start_stop_times(example):
         if not add_alignment:
             if "events_start_times" in example:
@@ -81,12 +130,25 @@ def get_train(
 
 
 def get_dataset(name, audio_reader, cache=False):
+    """get a dataset from DESED database which lazily loads audio data (or caches it in memory).
+
+    Args:
+        name: Name of the requested dataset
+        audio_reader: AudioReader kwargs
+        cache: whether to cache the dataset in memory
+
+    Returns:
+        dataset: lazy_dataset (iteratable) lazily loading (cached) example dicts
+            containing an audio waveform plus meta data.
+
+    """
     ds = db.get_dataset(name)
     ds = ds.filter(lambda ex: ex['audio_length'] > 1., lazy=False)
     print(f'Data set length {name}:', len(ds))
 
     audio_reader = AudioReader(**audio_reader)
-    if name == "desed_synthetic":
+    if name == "synthetic":
+        # load background and event audio separately
         def load_data(example):
             event_files = Path(example['audio_path'][:-len('.wav')] + '_events').glob('*.wav')
             audio_data = []
@@ -107,6 +169,7 @@ def get_dataset(name, audio_reader, cache=False):
         if cache:
             ds = ds.cache(lazy=False).map(lambda ex: copy(ex))
 
+        # perform on-the-fly reverberation
         rooms = db.get_dataset('rir_data_train')
 
         def reverberate(example_audio_data):
@@ -155,6 +218,51 @@ def prepare_dataset(
         min_examples=None,
         max_chunk_len=None, chunk_overlap=0,
 ):
+    """
+
+    Args:
+        dataset: lazy_dataset as returned by get_dataset
+        storage_dir: location to store event label mapping
+        audio_reader: AudioReader kwargs
+        stft: STFT kwargs
+        num_workers: number of workers used in prefetching
+        prefetch_buffer: number of batches to be prefetched
+        batch_size:
+        max_padding_rate: maximum amount of padding allowed. Determines which
+            clips can be joined to a batch (see lazy_dataset.DynamicTimeSeriesBucket)
+        bucket_expiration: maximum number of examples to wait for a bucket to
+            complete (see lazy_dataset.DynamicTimeSeriesBucket)
+        unlabeled: whether to discard labels (if available)
+        add_alignment: whether frame-level labels should be added to example
+            dicts
+        local_shuffle: whether to perform local shuffle when max_chunk_len is
+            not None. This serves the purpose to not always have the chunks of
+            a clip in the same batch.
+        drop_incomplete: whether to drop expired buckets or process it with a
+            smaller batch_size
+        mixup_probs: probabilities for the number of components in a mixture
+            (superpposition in our case). E.g., for mixup_prob=(1,) no mixup is
+            performed and for mixup_prob=(.5,.5) no mixup is performed with a
+            probability of .5 and mixup of two clips is performed with a
+            probability of .5 .
+        max_mixup_length: In our mixup implementation audio clips may be
+            shifted to each other before superposition. max_mixup_length limits
+            the shift such that the superposition is not longer than
+            max_mixup_length frames.
+        min_mixup_overlap: limits the shift explained above such that
+            superposed clips overlap at least at a rate of min_mixup_overlap
+        min_examples: a dict with dataset names as keys and an integer value
+            indicating the minimum number of examples from a dataset in each
+            batch.
+        max_chunk_len: the maximum number of frames allowed in a clip. Clips
+            exceeding max_chunk_len will be split into chunks.
+        chunk_overlap: overlap rate of adjacent chunks
+
+    Returns:
+        dataset: lazy_dataset (iteratable) lazily loading example dicts
+            containing an stft plus meta data.
+
+    """
 
     stft = STFT(**stft)
     dataset = dataset.map(stft)
@@ -171,7 +279,7 @@ def prepare_dataset(
             event_encoder = MultiHotLabelEncoder(
                 label_key='events', storage_dir=storage_dir,
             )
-        event_encoder.initialize_labels(dataset=db.get_dataset("desed_real_weak"), verbose=True)
+        event_encoder.initialize_labels(dataset=db.get_dataset("weak"), verbose=True)
         dataset = dataset.map(event_encoder)
 
     def finalize(example):
@@ -243,7 +351,9 @@ class DatasetBalancedTimeSeriesBucket(DynamicTimeSeriesBucket):
 
         Args:
             init_example: first example in the bucket
-            min_examples:
+            min_examples: a dict with dataset_names as keys and integer values
+                indicating the minimum number of examples from that dataset
+                within each batch
             **kwargs: kwargs of DynamicTimeSeriesBucket
         """
         super().__init__(init_example, **kwargs)

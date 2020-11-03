@@ -1,3 +1,52 @@
+"""
+This script downloads the DESED database to a local path with the following structure:
+
+├── real
+│   ├── audio
+│   │   ├── eval
+│   │   │   ├── eval_dcase2019
+│   │   │   └── eval_dcase2020
+│   │   ├── train
+│   │   │   ├── unlabel_in_domain
+│   │   │   └── weak
+│   │   └── validation
+│   │       └── validation
+│   ├── dataset
+│   │   ├── audio
+│   │   │   └── eval
+│   │   └── metadata
+│   │       └── eval
+│   ├── metadata
+│   │   ├── eval
+│   │   ├── train
+│   │   └── validation
+│   └── missing_files
+├── rir_data
+│   ├── eval
+│   ├── train
+│   └── validation
+└── synthetic
+    ├── audio
+    │   ├── eval
+    │   │   └── soundbank
+    │   └── train
+    │       ├── soundbank
+    │       └── synthetic20
+    ├── dcase2019
+    │   └── dataset
+    │       ├── audio
+    │       └── metadata
+    └── metadata
+        └── train
+            └── synthetic20
+
+Information about the database can be found here:
+https://project.inria.fr/desed/dcase-challenge/dcase-2020-task-4/
+
+Example usage:
+python -m pb_sed.database.desed.download -db /desired/path/to/desed
+
+"""
 import os
 from pathlib import Path
 from shutil import copyfile
@@ -66,19 +115,14 @@ def download_real_audio_from_csv(
     default=10,
 )
 def main(database_path, n_jobs, chunk_size):
-    """Download dataset packages over the internet to the local path
+    """Download dataset packages over the internet to a local path
 
-    Parameters
-    ----------
+    Args:
+        database_path:
+        n_jobs:
+        chunk_size:
 
-    Returns
-    -------
-    Nothing
-
-    Raises
-    -------
-    IOError
-        Download failed.
+    Returns:
 
     """
     database_path = Path(database_path).absolute()
@@ -122,18 +166,19 @@ def main(database_path, n_jobs, chunk_size):
     (dataset_real_path / "dataset" / "metadata" / "eval" / "public.tsv").rename(
         dataset_real_path / "metadata" / "eval" / "eval_dcase2019.tsv"
     )
-    copyfile(
-        pb_sed_root / 'exp' / 'dcase_2020_tagging' / '2020-07-03-22-27-00' / 'unlabel_in_domain_pseudo_weak_2020-07-03-22-27-00.tsv',
-        dataset_real_path / "metadata" / "train" / 'unlabel_in_domain_pseudo_weak_2020-07-03-22-27-00.tsv',
-    )
-    copyfile(
-        pb_sed_root / 'exp' / 'dcase_2020_detection' / '2020-07-04-22-16-46' / 'weak_pseudo_strong_2020-07-04-22-16-46.tsv',
-        dataset_real_path / "metadata" / "train" / 'weak_pseudo_strong_2020-07-04-22-16-46.tsv',
-    )
-    copyfile(
-        pb_sed_root / 'exp' / 'dcase_2020_detection' / '2020-07-04-22-33-13' / 'unlabel_in_domain_pseudo_strong_2020-07-04-22-33-13.tsv',
-        dataset_real_path / "metadata" / "train" / 'unlabel_in_domain_pseudo_strong_2020-07-04-22-33-13.tsv',
-    )
+    for timestamp in [
+        '2020-07-03-20-48-45', '2020-07-03-20-49-48', '2020-07-03-20-52-19',
+        '2020-07-03-21-00-48', '2020-07-03-21-05-34',
+        '2020-07-04-13-10-05', '2020-07-04-13-10-19', '2020-07-04-13-10-33',
+        '2020-07-04-13-11-09', '2020-07-04-13-12-06',
+        '2020-07-05-12-37-18', '2020-07-05-12-37-26', '2020-07-05-12-37-35',
+        '2020-07-05-12-37-45', '2020-07-05-12-37-54',
+    ]:
+        for file in (pb_sed_root / 'exp' / 'dcase_2020_inference' / timestamp).glob('*.tsv'):
+            if file.name.startswith('weak') or file.name.startswith('unlabel_in_domain'):
+                copyfile(
+                    file, dataset_real_path / "metadata" / "train" / file.name,
+                )
 
     (dataset_real_path / "audio" / "eval").rename(
         dataset_real_path / "audio" / "eval_dcase2020"

@@ -2,16 +2,20 @@ import numpy as np
 
 
 def tp_fp_tn_fn(target_mat, decision_mat, reduce_axis=None):
-    """
+    """Counts true positives, false positives, true negatives and false negatives.
 
     Args:
-        target_mat: multi-hot matrix indicating ground truth events/labels
-            (num_frames, num_labels)
-        decision_mat: multi-hot matrix indicating detected events/labels
-            (N, num_frames, num_labels)
+        target_mat: multi-hot matrix indicating ground truth
+            (num_instances, num_classes)
+        decision_mat: multi-hot matrix indicating detected (event) classes
+            (N, num_instances, num_classes)
         reduce_axis:
 
     Returns:
+        true positives:
+        false positives:
+        true negatives:
+        false negatives:
 
     """
     tp = target_mat * decision_mat
@@ -27,18 +31,20 @@ def tp_fp_tn_fn(target_mat, decision_mat, reduce_axis=None):
 
 
 def fscore(target_mat, decision_mat, beta=1., event_wise=False):
-    """
-    Computes frame-based f-score
+    """Computes instance-based f-score given binary decisions, i.e. after a decision threshold has been applied.
 
     Args:
-        target_mat: multi-hot matrix indicating ground truth events/labels
-            (num_frames, num_labels)
-        decision_mat: multi-hot matrix indicating detected events/labels
-            (N, num_frames, num_labels)
+        target_mat: multi-hot matrix indicating ground truth
+            (num_instances, num_classes)
+        decision_mat: multi-hot matrix indicating detected (event) classes
+            (N, num_instances, num_classes)
         event_wise:
         beta:
 
-    Returns: frame-based f-scores  (N,)
+    Returns:
+        fscore:
+        precision:
+        recall:
 
     """
     reduce_axis = -2 if event_wise else (-2, -1)
@@ -54,16 +60,19 @@ def fscore(target_mat, decision_mat, beta=1., event_wise=False):
 def substitutions_insertions_deletions(
         target_mat, decision_mat, reduce_axis=None
 ):
-    """
+    """Counts substitutions, insertions and deletions for computation of an error rate
 
     Args:
-        target_mat: multi-hot matrix indicating ground truth events/labels
-            (num_frames times num_labels)
-        decision_mat: multi-hot matrix indicating detected events/labels
-            (num_frames times num_labels)
+        target_mat: multi-hot matrix indicating ground truth
+            (num_instances, num_classes)
+        decision_mat: multi-hot matrix indicating detected (event) classes
+            (num_instances, num_classes)
         reduce_axis:
 
     Returns:
+        substitutions:
+        insertions:
+        deletions:
 
     """
     _, insertions, _, deletions = tp_fp_tn_fn(
@@ -92,16 +101,20 @@ def substitutions_insertions_deletions(
 
 
 def error_rate(target_mat, decision_mat, event_wise=False):
-    """
+    """Computes instance-based error rate given binary decisions, i.e. after a decision threshold has been applied.
 
     Args:
-        target_mat: multi-hot matrix indicating ground truth events/labels
-            (num_frames times num_labels)
-        decision_mat: multi-hot matrix indicating detected events/labels
-            (num_frames times num_labels)
+        target_mat: multi-hot matrix indicating ground truth
+            (num_instances, num_classes)
+        decision_mat: multi-hot matrix indicating detected (event) classes
+            (num_instances, num_classes)
         event_wise:
 
     Returns:
+        error_rate:
+        substitution_rate:
+        insertion_rate:
+        deletion_rate:
 
     """
     reduce_axis = -2 if event_wise else (-2, -1)
@@ -231,11 +244,8 @@ def _metric_curve(target_vec, score_vec, metric):
         metric:
 
     Returns:
-
-    >>> target_vec = np.array([1.0, 1.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0])
-    >>> score_vec = np.array([0.6, 0.2, 0.5, 0.4, 0.3, 0.1, 0.7, 0.0, 0.0])
-    >>> _metric_curve(target_vec, score_vec, 'f1')
-
+        metric values:
+        thresholds:
     """
     sort_indices = np.argsort(score_vec)
     score_vec = np.concatenate((score_vec[sort_indices], [np.inf]))
@@ -263,22 +273,55 @@ def _metric_curve(target_vec, score_vec, metric):
 
 
 def f1_curve(target_vec, score_vec):
+    """Computes f1 score for decision thresholds between two adjacent scores.
+
+    Args:
+        target_vec: binary targets indicating ground truth (num_instances,)
+        score_vec: binary classification scores (num_instances,)
+
+    Returns:
+        f1_scores: len(set(score_vec)+1) f1 scores
+        thresholds: len(set(score_vec)+1) decision thresholds
+
+    >>> target_vec = np.array([1.0, 1.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+    >>> score_vec = np.array([0.6, 0.2, 0.5, 0.4, 0.3, 0.1, 0.7, 0.0, 0.0])
+    >>> f1_curve(target_vec, score_vec)
+    (array([0.5       , 0.6       , 0.66666667, 0.5       , 0.57142857,
+           0.33333333, 0.4       , 0.        , 0.        ]), array([-inf, 0.05, 0.15, 0.25, 0.35, 0.45, 0.55, 0.65,  inf]))
+
+    """
     return _metric_curve(target_vec, score_vec, metric='f1')
 
 
 def er_curve(target_vec, score_vec):
+    """Given single-class soft scores computes error rate for each threshold between two adjacent score values.
+
+    Args:
+        target_vec: binary targets indicating ground truth (num_instances,)
+        score_vec: binary classification scores (num_instances,)
+
+    Returns:
+        error_rates: len(set(score_vec)+1) f1 error_rates
+        thresholds: len(set(score_vec)+1) decision thresholds
+
+    """
     return _metric_curve(target_vec, score_vec, metric='er')
 
 
 def get_optimal_thresholds(target_mat, score_mat, metric):
-    """
+    """Given multi-class soft scores returns the optimal threshold for each class w.r.t. a provided metric.
 
     Args:
-        target_mat:
-        score_mat:
-        metric:
+        target_mat: multi-hot matrix indicating ground truth
+            (num_instances, num_classes)
+        score_mat: classification scores for multi-label classification
+            (num_instances, num_classes)
+        metric: metric to be optimized \in {'f1', 'er'}
 
     Returns:
+        thresholds: opitmal thresholds (num_classes,)
+        metric values: optimal metric values
+
 
     >>> target_mat = np.array([[1.0], [1.0], [0.0], [1.0], [0.0], [0.0], [0.0], [0.0], [0.0]])
     >>> score_mat = np.array([[0.6], [0.2], [0.5], [.4], [0.3], [0.1], [0.7], [0.0], [0.0]])
@@ -301,35 +344,3 @@ def get_optimal_thresholds(target_mat, score_mat, metric):
         best_values.append(cur_values[best_idx])
         thresholds.append(cur_thresholds[best_idx])
     return np.array(thresholds), np.array(best_values)
-
-
-def get_thresholds(target_mat, score_mat):
-    """
-
-    Args:
-        target_mat:
-        score_mat:
-
-    Returns:
-
-    >>> target_mat = np.array([[1.0], [1.0], [0.0], [1.0], [0.0], [0.0], [0.0]])
-    >>> score_mat = np.array([[0.6], [0.2], [0.5], [.4], [0.3], [0.1], [0.7]])
-    >>> get_thresholds(target_mat, score_mat)
-    [array([0.15, 0.35, 0.55,  inf])]
-    """
-    candidate_thresholds = []
-    for label_idx in range(target_mat.shape[-1]):
-        cur_targets = target_mat[:, label_idx]
-        cur_scores = score_mat[:, label_idx]
-        sort_indices = np.argsort(cur_scores)
-        cur_scores = cur_scores[sort_indices]
-        cur_targets = cur_targets[sort_indices]
-        edge_detection = np.correlate(2*cur_targets-1, [-1, 1], mode='full')
-        edge_indices = np.argwhere(edge_detection > 0.5).flatten()
-        cur_candidate_thresholds = np.array([
-            -np.inf if i == 0 else np.inf if i == len(cur_scores)
-            else (cur_scores[i-1]+cur_scores[i])/2
-            for i in edge_indices
-        ])
-        candidate_thresholds.append(cur_candidate_thresholds)
-    return candidate_thresholds

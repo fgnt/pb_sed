@@ -1,3 +1,22 @@
+"""
+This script tunes for given CRNNs and CNNs the following hyper parameters for
+each event class on the validation set.
+
+- decision threshold for audio tagging
+- CRNN context length for event detection
+- decision threshold for event detection
+- median-filter sizes for event detection
+
+Hyper parameters are optimized w.r.t. both F1-score and ER.
+For event detection hyper-parameters are further optimized w.r.t. both
+frame-based and event-based evaluation.
+
+Example call:
+python -m pb_sed.experiments.dcase_2020_task_4.tune_hyper_params with 'crnn_dirs=["/path/to/storage_root/dcase_2020_crnn/<timestamp_crnn_1>","/path/to/storage_root/dcase_2020_crnn/<timestamp_crnn_2>",...]' 'cnn_dirs=["/path/to/storage_root/dcase_2020_cnn/<timestamp_cnn_1>","/path/to/storage_root/dcase_2020_cnn/<timestamp_cnn_2>",...]'
+
+Hyper-parameters are stored in a directory
+/path/to/storage_root/dcase_2020_hyper_params/<timestamp>
+"""
 from collections import defaultdict
 from pathlib import Path
 
@@ -78,10 +97,10 @@ def main(
 
     crnns = []
 
-    # tagging:
     print('Audio Tagging:')
     tagging_score_mat = []
     tagging_target_mat = None
+    # compute tagging scores of each sub model in the CRNN ensemble
     for exp_dir, crnn_checkpoint in zip(crnn_dirs, crnn_checkpoints):
         crnn: CRNN = CRNN.from_storage_dir(
             storage_dir=exp_dir, config_name='1/config.json',
@@ -111,7 +130,7 @@ def main(
             tagging_target_mat = target_mat_i
         else:
             assert (target_mat_i == tagging_target_mat).all()
-    tagging_score_mat = np.mean(tagging_score_mat, axis=0)
+    tagging_score_mat = np.mean(tagging_score_mat, axis=0)  # average over sub models
     th_f, best_f = instance_based.get_optimal_thresholds(tagging_target_mat, tagging_score_mat, metric='f1')
     dump_json(th_f.tolist(), Path(storage_dir) / 'tagging_thresholds_best_f1.json')
     print('  F-scores:', np.round(best_f, decimals=print_decimals).tolist())
@@ -125,13 +144,25 @@ def main(
     del tagging_score_mat
     del tagging_target_mat
 
-    # detection:
     print('Sound event detection:')
+    # remember which set of hyper parameter performed best for each event class:
     best_frame_er = defaultdict(list)
     best_frame_f = defaultdict(list)
     best_event_f = defaultdict(list)
 
     def sweep_medfilts(target_mat, score_mat, name):
+        """given ground truth targets and a score_mat sweep median-filter sizes
+         and save best hyper-params
+
+        Args:
+            target_mat: ground truth (num_clips, num_frames, num_classes)
+            score_mat: ensemble scores (num_clips, num_frames, num_classes)
+            name: identifier of the model, e.g., crnn_10 for a CRNN with a
+                one-sided context length of 10
+
+        Returns:
+
+        """
         ensemble = name.split('_')[0]
         for medfilt_size in medfilt_sizes:
             print(f'    Medfilt size: {medfilt_size}')
@@ -208,6 +239,7 @@ def main(
 
     detection_target_mat = None
     cnn_detection_score_mat = None
+    # if required compute CNN scores of each sub model in CNN ensemble
     if any([ensemble != 'crnn' for ensemble in ensembles]):
         assert len(cnn_dirs) > 0
         cnn_detection_score_mat = []
@@ -253,12 +285,13 @@ def main(
                 detection_target_mat = target_mat_i
             else:
                 assert (target_mat_i == detection_target_mat).all()
-        cnn_detection_score_mat = np.mean(cnn_detection_score_mat, axis=0)
+        cnn_detection_score_mat = np.mean(cnn_detection_score_mat, axis=0)  # average over sub models
 
         if 'cnn' in ensembles:
             print(f'  Ensemble: cnn')
             sweep_medfilts(detection_target_mat, cnn_detection_score_mat, 'cnn')
 
+    # if required run CRNN SED for each sub model in CRNN ensemble
     if any([ensemble != 'cnn' for ensemble in ensembles]):
         for context in contexts:
             crnn_detection_score_mat = []
@@ -292,7 +325,7 @@ def main(
                     detection_target_mat = target_mat_i
                 else:
                     assert (target_mat_i == detection_target_mat).all()
-            crnn_detection_score_mat = np.mean(crnn_detection_score_mat, axis=0)
+            crnn_detection_score_mat = np.mean(crnn_detection_score_mat, axis=0)  # average over sub models
 
             if 'hybrid' in ensembles:
                 name = f'hybrid_{context}'
@@ -311,33 +344,8 @@ def main(
                     f'crnn_{context}'
                 )
 
-    best_final_frame_f = None
-    best_final_frame_er = None
-    best_final_event_f = None
+    # save best set of hyper-parameters for the individual event classes
     for ensemble in ensembles:
-        if best_final_frame_f is None:
-            best_final_frame_f = best_frame_f[ensemble]
-            best_final_frame_er = best_frame_er[ensemble]
-            best_final_event_f = best_event_f[ensemble]
-        else:
-            best_final_frame_f = [
-                opponent if opponent[0] > cur_best[0] else cur_best
-                for cur_best, opponent in zip(
-                    best_final_frame_f, best_frame_f[ensemble]
-                )
-            ]
-            best_final_frame_er = [
-                opponent if opponent[0] > cur_best[0] else cur_best
-                for cur_best, opponent in zip(
-                    best_final_frame_er, best_frame_er[ensemble]
-                )
-            ]
-            best_final_event_f = [
-                opponent if opponent[0] > cur_best[0] else cur_best
-                for cur_best, opponent in zip(
-                    best_final_event_f, best_event_f[ensemble]
-                )
-            ]
         print('\n')
         best_config = [entry[1] for entry in best_frame_f[ensemble]]
         dump_json(best_config, Path(storage_dir) / f'best_frame_f1_{ensemble}_config.json')
@@ -360,27 +368,3 @@ def main(
         print(f'Best event-based {ensemble} F-scores:', np.round(best_f, decimals=print_decimals).tolist())
         print(f'Best event-based {ensemble} macro F-score:', np.round(np.mean(best_f), decimals=print_decimals))
         print('')
-
-    print('\n')
-    best_config = [entry[1] for entry in best_final_frame_f]
-    dump_json(best_config, Path(storage_dir) / f'best_frame_f1_final_config.json')
-    best_f = [entry[0] for entry in best_final_frame_f]
-    print('Best frame-based final F-score configuration:', best_config)
-    print('Best frame-based final F-scores:', np.round(best_f, decimals=print_decimals).tolist())
-    print('Best frame-based final macro F-score:', np.round(np.mean(best_f), decimals=print_decimals))
-    print('')
-    best_config = [entry[1] for entry in best_final_frame_er]
-    dump_json(best_config, Path(storage_dir) / f'best_frame_er_final_config.json')
-    best_er = [entry[0] for entry in best_final_frame_er]
-    print('Best frame-based final error-rate configuration:', best_config)
-    print('Best frame-based final error-rates:', np.round(best_er, decimals=print_decimals).tolist())
-    print('Best frame-based final macro error-rate:', np.round(np.mean(best_er), decimals=print_decimals))
-    print('')
-    best_config = [entry[1] for entry in best_final_event_f]
-    dump_json(best_config, Path(storage_dir) / f'best_event_f1_final_config.json')
-    best_f = [entry[0] for entry in best_final_event_f]
-    print('Best event-based final F-score configuration:', best_config)
-    print('Best event-based final F-scores:', np.round(best_f, decimals=print_decimals).tolist())
-    print('Best event-based final macro F-score:', np.round(np.mean(best_f), decimals=print_decimals))
-    print('\n')
-    print('Storage directory:', storage_dir)

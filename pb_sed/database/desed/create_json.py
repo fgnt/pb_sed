@@ -1,3 +1,22 @@
+"""
+This script prepares a json file comprising information about the DESED
+database. Information about the database can be found here:
+
+https://project.inria.fr/desed/dcase-challenge/dcase-2020-task-4/
+
+For each audio clip a dict is stored containing the following keys:
+audio_path: path to audio file
+audio_length: length of audio clip in seconds
+
+and if available:
+events: list of events present in the audio clip
+events_start_times: onset times in seconds for each event in events list
+events_stop_times: offset times in seconds for each event in events list
+
+Example usage:
+python -m pb_sed.database.desed.create_json -db /path/to/desed
+"""
+
 from natsort import natsorted
 from pathlib import Path
 from collections import defaultdict
@@ -8,6 +27,14 @@ from pb_sed.database.helper import prepare_sound_dataset
 
 
 def construct_json(database_path):
+    """
+
+    Args:
+        database_path:
+
+    Returns:
+
+    """
     database = {
         'datasets': dict()
     }
@@ -40,10 +67,10 @@ def construct_json(database_path):
                         examples[segment_id][f'events_start_times'] = []
                         examples[segment_id][f'events_stop_times'] = []
                     examples[segment_id]['events'] = events
-            database['datasets'][f'desed_real_{name}'] = prepare_sound_dataset(examples)
+            database['datasets'][name] = prepare_sound_dataset(examples)
 
             print(
-                f'{len(segment_ids) - len(database["datasets"][f"desed_real_{name}"])} '
+                f'{len(segment_ids) - len(database["datasets"][name])} '
                 f'from {len(segment_ids)} files missing in {name}.'
             )
 
@@ -67,9 +94,9 @@ def construct_json(database_path):
             examples[segment_id][f'events_start_times'] = []
             examples[segment_id][f'events_stop_times'] = []
         examples[segment_id]['events'] = events
-    database['datasets'][f'desed_synthetic'] = prepare_sound_dataset(examples)
+    database['datasets'][f'synthetic'] = prepare_sound_dataset(examples)
     print(
-        f'{len(segment_ids) - len(database["datasets"]["desed_synthetic"])} '
+        f'{len(segment_ids) - len(database["datasets"]["synthetic"])} '
         f'from {len(segment_ids)} files missing in synthetic'
     )
 

@@ -41,7 +41,7 @@ def fscore(
         target_mat, decision_mat, collar, offset_collar_rate,
         beta=1., event_wise=False
 ):
-    """
+    """Computes event-based fscore from multi-hot target and decision matrices
 
     Args:
         target_mat: multi-hot matrix indicating ground truth events/labels
@@ -54,6 +54,10 @@ def fscore(
         event_wise:
 
     Returns:
+        fscore:
+        precision:
+        recall:
+
     >>> target_mat_1 = np.array([[0,0,1,1,1,0,0,0,1,1],[1,1,1,1,1,0,0,0,0,0]])[..., None]
     >>> score_mat_1 = np.array([[0,0,0,0,1,1,0,0,1,1],[1,1,1,1,1,0,0,0,0,0]])[..., None]
     >>> fscore(target_mat_1, score_mat_1, 1, .5)
@@ -124,16 +128,21 @@ def fscore(
 def get_optimal_thresholds(
         target_mat, score_mat, metric, collar, offset_collar_rate, decimals=4
 ):
-    """
+    """Given multi-class soft scores returns the optimal threshold for each class w.r.t. a provided metric.
 
     Args:
-        target_mat:
-        score_mat:
-        metric:
-        collar:
-        offset_collar_rate:
+        target_mat: multi-hot matrix indicating ground truth
+            (num_clips, num_frames, num_classes)
+        score_mat: classification scores for multi-label classification
+            (num_clips, num_frames, num_classes)
+        metric: metric to be optimized \in {'f1', 'er'}
+        collar: absolute on-/offset collar in frames
+        offset_collar_rate: percentage of event length with
+            offset_collar=max(collar, int(offset_collar_rate * t_event))
 
     Returns:
+        thresholds: opitmal thresholds (num_classes,)
+        metric values: optimal metric values
 
     >>> target_mat_1 = np.array([[0.,0.,1.,1.,1.,0.,0.,0.,1.,1.],[1.,1.,1.,1.,1.,0.,0.,0.,0.,0.]])[..., None]
     >>> score_mat_1 = np.array([[0.,0.,0.,0.,.92,.81,0.,0.,.80,.64],[.32,.67,.44,.75,.22,.11,.11,0.,0.,0.]])[..., None]
@@ -151,7 +160,16 @@ def get_optimal_thresholds(
     thresholds = []
     values = []
     b, t, k = target_mat.shape
-    for label_idx in range(target_mat.shape[-1]):
+    for label_idx in range(target_mat.shape[-1]):  # compute for each class individually
+        # similarly to instance_based._metric_curve we aim to compute the
+        # metric value, e.g., fscore, for decision thresholds between each
+        # adjacent score pairs, i.e., we like to compute the metric value
+        # when the the decision threshold is below the current score but above
+        # the next smaller score in the score_mat.
+        # For that purpose we like to compute the number of true positives,
+        # the total number of positive predictions n_sys
+        # and the ground truth number of events n_ref at each score in score_mat.
+
         cur_targets = target_mat[:, :, label_idx]
         cur_scores = score_mat[:, :, label_idx]
         prev_scores = np.concatenate(
@@ -161,16 +179,28 @@ def get_optimal_thresholds(
             (cur_scores[:, 1:], -np.inf*np.ones((b, 1))), axis=1
         )
         onset_counts = (cur_scores > prev_scores).astype(np.int) - (next_scores > cur_scores).astype(np.int)
+        # onset_counts allows to count the number of onsets (which equals number of positive predictions n_sys):
+        # 1) onset_counts == 1 if cur_scores > prev_scores and next_scores < cur_scores,
+        # 2) onset_counts == -1 if cur_scores < prev_scores and next_scores > cur_scores (cur_score represent a local maximum),
+        # else 0.
+        # In case 1) cur_score is a local maximum and if the decision threshold
+        # falls below that score this results in a new onset.
+        # In case 2) cur_score is a local minimum and if the decision threshold
+        # falls below that score two separate events are merged to one and one
+        # onset has to be substracted.
 
+        # it remains to compute number of true positives and n_ref
         target_boundary_detection = correlate(cur_targets, [-1, 1], mode='full')
-        target_onset_indices = np.argwhere(target_boundary_detection > 0.5)
+        target_onset_indices = np.argwhere(target_boundary_detection > 0.5)  # len is n_ref
         target_offset_indices = np.argwhere(target_boundary_detection < -0.5)
         tp_counts = np.zeros_like(onset_counts)
-        for (n_on, t_on), (n_off, t_off) in zip(target_onset_indices, target_offset_indices):
+        # iterate each target event
+        for (n_on, t_on), (n_off, t_off) in zip(target_onset_indices, target_offset_indices):  # n represents clip indices and t frame indices
             assert n_on == n_off, (n_on, n_off)
             offset_collar = int(max(
                 collar, offset_collar_rate * (t_off - t_on)
             ))
+            # determine the allowed onset and offset collar and split the score accordingly:
             onset_collar_onset = max(t_on - collar, 0)
             onset_collar_offset = t_on + collar - 1
             offset_collar_onset = max(t_off - offset_collar + 1, 0)
@@ -182,9 +212,18 @@ def get_optimal_thresholds(
             scores_onset_collar = cur_scores[n_on, onset_collar_onset:onset_collar_offset]
             scores_offset_collar = cur_scores[n_on, offset_collar_onset:offset_collar_offset]
 
+            # target can only be true positive if the decision threshold falls
+            # below all scores in scores_inner:
             max_detection_score_idx = onset_collar_offset+np.argmin(scores_inner)
 
+            # decision threshold must exceed at least one score in onset collar
+            # otherwise there is no onset in the collar
+            # (if the collar does not include the first frame of the clip)
             min_onset_detection_score_idx = None if t_on < collar else onset_collar_onset + np.argmin(scores_onset_collar)
+
+            # decision threshold must exceed at least one score in offset collar
+            # otherwise there is no offset in the collar
+            # (if the collar does not include the last frame of the clip)
             min_offset_detection_score_idx = None if t-t_off < offset_collar else offset_collar_onset+np.argmin(scores_offset_collar)
             if min_onset_detection_score_idx is not None and min_offset_detection_score_idx is not None:
                 if cur_scores[n_on, min_onset_detection_score_idx] > cur_scores[n_on, min_offset_detection_score_idx]:
@@ -199,8 +238,14 @@ def get_optimal_thresholds(
                 min_detection_score_idx = None
 
             if min_detection_score_idx is None or cur_scores[n_on, max_detection_score_idx] > cur_scores[n_on, min_detection_score_idx]:
+                # when the decision threshold falls below
+                # cur_scores[n_on, max_detection_score_idx]
+                # the target is detected true positive
                 tp_counts[n_on, max_detection_score_idx] += 1
                 if min_detection_score_idx is not None:
+                    # As soon as the decision threshold falls below
+                    # cur_scores[n_on, min_detection_score_idx]
+                    # the target is not detected true positive anymore
                     tp_counts[n_on, min_detection_score_idx] -= 1
             # else: cannot be detected as true positive
 
@@ -213,6 +258,9 @@ def get_optimal_thresholds(
         onset_counts = np.concatenate((onset_counts[sort_indices], [0]))
         tp_counts = np.concatenate((tp_counts[sort_indices], [0]))
 
+        # cumulative sum of the true positives and n_sys for scores > cur_score
+        # (note that tp_counts and onset_counts may also include negative values,
+        # i.e., subtractions if the decision threshold falls below such scores)
         tps = np.cumsum(tp_counts[::-1])[::-1]
         n_sys = np.cumsum(onset_counts[::-1])[::-1]
 

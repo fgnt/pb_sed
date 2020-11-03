@@ -95,6 +95,17 @@ class CRNN(Model):
         return y, seq_len
 
     def sed(self, x, context, seq_len=None):
+        """
+        SED by applying the model to small segments around each frame
+
+        Args:
+            x:
+            context:
+            seq_len:
+
+        Returns:
+
+        """
         x, seq_len = self.feature_extractor(x, seq_len=seq_len)
         h, seq_len = self.cnn_2d(x, seq_len)
         h, seq_len = self.cnn_1d(h, seq_len)
@@ -111,6 +122,15 @@ class CRNN(Model):
         return y_sed, seq_len
 
     def forward(self, inputs):
+        """
+        forward used in trainer
+
+        Args:
+            inputs: example dict
+
+        Returns:
+
+        """
         x = inputs['stft']
         seq_len = np.array(inputs['seq_len'])
         x, seq_len = self.feature_extractor(x, seq_len=seq_len)
@@ -125,7 +145,16 @@ class CRNN(Model):
         return (y_fwd, y_bwd, seq_len_y), x
 
     def review(self, inputs, outputs):
-        # compute loss
+        """
+        compute loss and metrics
+
+        Args:
+            inputs:
+            outputs:
+
+        Returns:
+
+        """
         (y_fwd, y_bwd, seq_len_y), x = outputs
 
         y, seq_len_y = self.prediction_pooling(y_fwd, y_bwd, seq_len_y)
@@ -159,8 +188,16 @@ class CRNN(Model):
         return review
 
     def modify_summary(self, summary):
-        # compute precision, recall and fscore
+        """called by the trainer before dumping a summary
+
+        Args:
+            summary:
+
+        Returns:
+
+        """
         if f'predictions' in summary['buffers']:
+            # Computes fscores from predictions and targets
             predictions = np.concatenate(summary['buffers'].pop('predictions'))
             k = predictions.shape[-1]
             targets = np.concatenate(summary['buffers'].pop('targets'))
@@ -173,9 +210,11 @@ class CRNN(Model):
             summary['scalars'][f'mean_fscore'] = best_f.mean()
 
         for key, scalar in summary['scalars'].items():
+            # average scalar metrics over batches
             summary['scalars'][key] = np.mean(scalar)
 
         for key, image in summary['images'].items():
+            # prepare image grid for tensorboard
             if image.dim() == 4 and image.shape[1] > 1:
                 image = image[:, 0]
             if image.dim() == 3:
@@ -187,6 +226,18 @@ class CRNN(Model):
 
     @classmethod
     def finalize_dogmatic_config(cls, config):
+        """Automatically prepares/completes the configuration of the model.
+
+        You do not need to understand how this is working as there is a lot of
+        magic in the background which serves convenience and is not crucial to
+        run the model.
+
+        Args:
+            config:
+
+        Returns:
+
+        """
         config['feature_extractor'] = {'factory': NormalizedLogMelExtractor}
         config['cnn_2d'] = {'factory': CNN2d}
         config['cnn_1d'] = {'factory': CNN1d}

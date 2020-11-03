@@ -5,6 +5,16 @@ import itertools
 
 
 def prepare_sound_dataset(examples, max_examples=int(1e12), postprocess_fn=None):
+    """
+    filters unavailable audio files and adds audio length to examples
+    Args:
+        examples:
+        max_examples:
+        postprocess_fn:
+
+    Returns:
+
+    """
     dataset = {}
     with concurrent.futures.ThreadPoolExecutor() as ex:
         for _, example_id, example in itertools.islice(
@@ -21,7 +31,7 @@ def prepare_sound_dataset(examples, max_examples=int(1e12), postprocess_fn=None)
 
 def prepare_sound_example(item: (str, dict)) -> (bool, str, dict):
     """
-    Creates example dict for one example with example_id.
+    Adds audio length to example dict.
     """
     example_id, example = item
     audio_path = example['audio_path']

@@ -1,3 +1,35 @@
+"""
+This script trains a (forward-backward) CRNN model.
+
+For model details see
+http://dcase.community/documents/workshop2020/proceedings/DCASE2020Workshop_Ebbers_69.pdf
+
+Available pseudo labeled unlabel_in_domain datasets:
+
+weak pseudo labels from FBCRNN ensembles trained on weak+synthetic:
+unlabel_in_domain_pseudo_weak_2020-07-03-20-48-45
+unlabel_in_domain_pseudo_weak_2020-07-03-20-49-48
+unlabel_in_domain_pseudo_weak_2020-07-03-20-52-19
+unlabel_in_domain_pseudo_weak_2020-07-03-21-00-48
+unlabel_in_domain_pseudo_weak_2020-07-03-21-05-34
+
+weak pseudo labels from FBCRNN ensembles trained on weak+synthetic+unlabel_in_domain_pseudo_weak:
+unlabel_in_domain_pseudo_weak_2020-07-04-13-10-05
+unlabel_in_domain_pseudo_weak_2020-07-04-13-10-19
+unlabel_in_domain_pseudo_weak_2020-07-04-13-10-33
+unlabel_in_domain_pseudo_weak_2020-07-04-13-11-09
+unlabel_in_domain_pseudo_weak_2020-07-04-13-12-06
+
+Example calls:
+train FBCRNN on weak+synthetic:
+python -m pb_sed.experiments.dcase_2020_task_4.train_crnn
+
+train CRNN (w/o backward tagging) on weak+synthetic w/o framewise loss:
+python -m pb_sed.experiments.dcase_2020_task_4.train_crnn with trainer.model.rnn_bwd=None trainer.model.clf_bwd=None trainer.model.framewise_training=False
+
+train FBCRNN on weak+synthetic+unlabel_in_domain_pseudo_weak:
+python -m pb_sed.experiments.dcase_2020_task_4.train_crnn with 'unlabel_in_domain_pseudo_weak_timestamp=2020-07-04-13-10-05'
+"""
 from pathlib import Path
 
 import numpy as np
@@ -25,15 +57,18 @@ def config():
     debug = False
 
     # Data configuration
+    unlabel_in_domain_pseudo_weak_timestamp = None
     dataset_repetitions = {
-        'desed_real_weak': 10,
-        'desed_synthetic': 2,
+        'weak': 10,
+        'synthetic': 2,
     }
+    if unlabel_in_domain_pseudo_weak_timestamp is not None:
+        dataset_repetitions[f'unlabel_in_domain_pseudo_weak_{unlabel_in_domain_pseudo_weak_timestamp}'] = 1
     audio_reader = {
         'source_sample_rate': None,
         'target_sample_rate': 16000,
     }
-    cached_datasets = [] if debug else ['desed_real_weak', 'desed_synthetic']
+    cached_datasets = [] if debug else ['weak', 'synthetic']
     stft = {
         'shift': 320,
         'window_length': 960,
@@ -47,8 +82,10 @@ def config():
     batch_size = 16
     min_examples = {
         **{ds: 0 for ds in dataset_repetitions},
-        'desed_real_weak': int(batch_size/3),
+        'weak': int(batch_size/3),
     }
+    if unlabel_in_domain_pseudo_weak_timestamp is not None:
+        min_examples[f'unlabel_in_domain_pseudo_weak_{unlabel_in_domain_pseudo_weak_timestamp}'] = 0
     num_workers = 8
     prefetch_buffer = 10 * batch_size
     max_total_size = None
@@ -182,7 +219,7 @@ def train(
         cached_datasets=cached_datasets,
     )
     validation_set = data.get_dataset(
-        'desed_real_validation', audio_reader=audio_reader,
+        'validation', audio_reader=audio_reader,
     )
     validation_iter = data.prepare_dataset(
         validation_set,

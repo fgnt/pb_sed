@@ -74,13 +74,31 @@ class CNN(Model):
         return (nn.Sigmoid()(y), seq_len), x
 
     def forward(self, inputs):
+        """
+        forward used in trainer
+
+        Args:
+            inputs: example dict
+
+        Returns:
+
+        """
         x = inputs['stft']
         seq_len = np.array(inputs['seq_len'])
         tags = inputs['events'] if self.tag_conditioning else None
         return self.predict(x, tags, seq_len)
 
     def review(self, inputs, outputs):
-        # compute loss
+        """
+        compute loss and metrics
+
+        Args:
+            inputs:
+            outputs:
+
+        Returns:
+
+        """
         (y, seq_len), x = outputs
         targets = inputs['events_alignment']
 
@@ -110,7 +128,16 @@ class CNN(Model):
         return review
 
     def modify_summary(self, summary):
+        """called by the trainer before dumping a summary
+
+        Args:
+            summary:
+
+        Returns:
+
+        """
         if 'tp' in summary['buffers']:
+            # Computes fscores from tp,fp and fn counts
             k = self._cnn_1d.out_channels[-1]
             tp = np.array(summary['buffers'].pop('tp')).sum(0)
             fp = np.array(summary['buffers'].pop('fp')).sum(0)
@@ -127,9 +154,11 @@ class CNN(Model):
             summary['scalars']['mean_fscore'] = np.mean(best_f)
 
         for key, scalar in summary['scalars'].items():
+            # average scalar metrics over batches
             summary['scalars'][key] = np.mean(scalar)
 
         for key, image in summary['images'].items():
+            # prepare image grid for tensorboard
             if image.dim() == 4 and image.shape[1] > 1:
                 image = image[:, 0]
             if image.dim() == 3:
@@ -141,6 +170,18 @@ class CNN(Model):
 
     @classmethod
     def finalize_dogmatic_config(cls, config):
+        """Automatically prepares/completes the configuration of the model.
+
+        You do not need to understand how this is working as there is a lot of
+        magic in the background which serves convenience and is not crucial to
+        run the model.
+
+        Args:
+            config:
+
+        Returns:
+
+        """
         config['feature_extractor'] = {'factory': NormalizedLogMelExtractor}
         config['cnn_2d'] = {'factory': CNN2d}
         config['cnn_1d'] = {'factory': CNN1d}
