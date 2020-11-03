@@ -20,16 +20,16 @@ import torch
 from paderbox.io.json_module import load_json
 from paderbox.transform.module_stft import STFT
 from paderbox.utils.timer import timeStamped
-from padercontrib.evaluation.event_detection import alignment_mat_to_event_list
 from padertorch.contrib.je.data.transforms import Collate
 from padertorch.data import example_to_device
+from pb_sed.evaluation import instance_based
+from pb_sed.evaluation.event_based import alignments_to_event_list
 from pb_sed.experiments.dcase_2020_task_4 import data
-from pb_sed.models.crnn import CRNN
 from pb_sed.models.cnn import CNN
+from pb_sed.models.crnn import CRNN
 from pb_sed.paths import storage_root
 from pb_sed.utils import join_tsv_files
 from pb_sed.utils import medfilt
-from pb_sed.evaluation import instance_based
 from sacred import Experiment as Exp
 from sacred.observers import FileStorageObserver
 
@@ -213,7 +213,7 @@ def main(
                 for detection_threshold_name in detection_threshold_names:
                     detection_threshold = np.array(load_json(str(Path(hyper_params_dir) / f'detection_thresholds_{detection_threshold_name}_{name}_{medfilt_size}.json')))
                     decision_mat = score_mat_filtered > np.array(detection_threshold)
-                    event_list = alignment_mat_to_event_list(decision_mat)
+                    event_list = alignments_to_event_list(decision_mat)
 
                     # If audio clips have been to long they may have been
                     # cut into smaller chunks (see data.py)
