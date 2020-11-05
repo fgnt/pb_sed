@@ -83,7 +83,7 @@ def main(
 ):
     assert all([ensemble in ['hybrid', 'crnn', 'cnn'] for ensemble in ensembles]), ensembles
     validation_set = data.get_dataset(
-        'desed_real_validation', audio_reader=crnn_config['audio_reader'],
+        'validation', audio_reader=crnn_config['audio_reader'],
     )
     validation_iter = data.prepare_dataset(
         validation_set,
