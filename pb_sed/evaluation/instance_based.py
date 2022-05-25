@@ -121,7 +121,7 @@ def error_rate(target_mat, decision_mat, event_wise=False):
     substitutions, insertions, deletions = substitutions_insertions_deletions(
         target_mat, decision_mat, reduce_axis=reduce_axis
     )
-    n_ref = np.maximum(np.sum(target_mat, axis=reduce_axis), 1e-15)
+    n_ref = np.maximum(np.sum(target_mat, axis=reduce_axis), 1)
     er = (insertions + deletions + substitutions) / n_ref
     return er, substitutions / n_ref, insertions / n_ref, deletions / n_ref
 
@@ -187,7 +187,7 @@ def lwlrap_from_precisions(precision_at_hits, class_indices, num_classes=None):
     return lwlrap, per_class_lwlrap, weight_per_class
 
 
-def lwlrap(target_mat, score_mat, event_wise=False):
+def lwlrap(target_mat, score_mat):
     """Calculate label-weighted label-ranking average precision.
     All-in-one calculation of per-class lwlrap.
 
@@ -215,13 +215,9 @@ def lwlrap(target_mat, score_mat, event_wise=False):
 
     >>> per_class_lwlrap = lwlrap(truth, scores)
     """
-    if score_mat.ndim > 2:
-        if target_mat.ndim == score_mat.ndim:
-            assert len(target_mat) == len(score_mat)
-            return np.array([lwlrap(t, s) for t, s in zip(target_mat, score_mat)])
-        else:
-            return np.array([lwlrap(target_mat, s) for s in score_mat])
-
+    if not target_mat.any():
+        return 0.0, np.zeros(target_mat.shape[-1])
+    assert score_mat.ndim == 2, score_mat.shape
     assert target_mat.shape == score_mat.shape
     pos_class_indices, precision_at_hits = positive_class_precisions(
         target_mat, score_mat
@@ -229,118 +225,151 @@ def lwlrap(target_mat, score_mat, event_wise=False):
     lwlrap_score, per_class_lwlrap, weight_per_class = lwlrap_from_precisions(
         precision_at_hits, pos_class_indices, num_classes=target_mat.shape[1]
     )
-    if event_wise:
-        return per_class_lwlrap
-    else:
-        return lwlrap_score
+    return lwlrap_score, per_class_lwlrap
 
 
-def _metric_curve(target_vec, score_vec, metric):
+def _positives_curve(targets, scores):
     """
 
     Args:
-        target_vec:
-        score_vec:
-        metric:
+        targets:
+        scores:
 
     Returns:
         metric values:
         thresholds:
     """
-    sort_indices = np.argsort(score_vec)
-    score_vec = np.concatenate((score_vec[sort_indices], [np.inf]))
-    target_vec = target_vec[sort_indices]
+    sort_indices = np.argsort(scores)
+    scores = np.concatenate((scores[sort_indices], [np.inf]))
+    targets = targets[sort_indices]
 
-    tps = np.cumsum(np.concatenate((target_vec, [0]))[::-1])[::-1]
-    n_sys = len(score_vec) - np.arange(len(score_vec)) - 1
-    n_ref = tps[0]
+    tps = np.cumsum(np.concatenate((targets, [0]))[::-1])[::-1]
+    n_sys = len(scores) - np.arange(len(scores)) - 1
 
-    score_vec, valid_idx = np.unique(score_vec, return_index=True)
-    tps = tps[valid_idx]
-    n_sys = n_sys[valid_idx]
-    if metric == 'f1':
-        p = tps / np.maximum(n_sys, 1)
-        r = tps / np.maximum(n_ref, 1)
-        values = 2*p*r / (p+r+1e-15)
-    elif metric == 'er':
-        i = n_sys - tps
-        d = n_ref - tps
-        values = (i+d)/n_ref
-    else:
-        raise NotImplementedError
-    thresholds = np.concatenate(([-np.inf], (score_vec[1:]+score_vec[:-1])/2))
-    return values, thresholds
+    scores, index, inverse = np.unique(scores, return_index=True, return_inverse=True)
+    tps = tps[index][inverse]
+    n_sys = n_sys[index][inverse]
+    thresholds = np.concatenate(([-np.inf], (scores[1:] + scores[:-1]) / 2))
+    return thresholds[inverse], n_sys, tps
 
 
-def f1_curve(target_vec, score_vec):
-    """Computes f1 score for decision thresholds between two adjacent scores.
+def fscore_curve(targets, scores, beta=1., tp_bias=0, n_ref_bias=0, n_pos_bias=0):
+    """Computes fscore for decision thresholds between two adjacent scores.
 
     Args:
-        target_vec: binary targets indicating ground truth (num_instances,)
-        score_vec: binary classification scores (num_instances,)
+        targets: binary targets indicating ground truth (num_instances,)
+        scores: binary classification scores (num_instances,)
 
     Returns:
         f1_scores: len(set(score_vec)+1) f1 scores
         thresholds: len(set(score_vec)+1) decision thresholds
 
-    >>> target_vec = np.array([1.0, 1.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0])
-    >>> score_vec = np.array([0.6, 0.2, 0.5, 0.4, 0.3, 0.1, 0.7, 0.0, 0.0])
-    >>> f1_curve(target_vec, score_vec)
-    (array([0.5       , 0.6       , 0.66666667, 0.5       , 0.57142857,
-           0.33333333, 0.4       , 0.        , 0.        ]), array([-inf, 0.05, 0.15, 0.25, 0.35, 0.45, 0.55, 0.65,  inf]))
+    >>> targets = np.array([1.0, 1.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+    >>> scores = np.array([0.6, 0.2, 0.5, 0.4, 0.3, 0.1, 0.7, 0.0, 0.0])
+    >>> fscore_curve(targets, scores)
+    (array([-inf, 0.05, 0.15, 0.25, 0.35, 0.45, 0.55, 0.65,  inf]), array([0.5       , 0.6       , 0.66666667, 0.5       , 0.57142857,
+           0.33333333, 0.4       , 0.        , 0.        ]), array([0.33333333, 0.42857143, 0.5       , 0.4       , 0.5       ,
+           0.33333333, 0.5       , 0.        , 0.        ]), array([1.        , 1.        , 1.        , 0.66666667, 0.66666667,
+           0.33333333, 0.33333333, 0.        , 0.        ]))
+    >>> targets = np.array([1.0, 1.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+    >>> scores = np.array([0.6, 0.2, 0.5, 0.4, 0.3, 0.1, 0.7, 0.0, 0.0])
+    >>> fscore_curve(np.stack([targets, targets]).T, np.stack([scores, scores]).T)
+    (array([-inf, 0.05, 0.15, 0.25, 0.35, 0.45, 0.55, 0.65,  inf]), array([0.5       , 0.6       , 0.66666667, 0.5       , 0.57142857,
+           0.33333333, 0.4       , 0.        , 0.        ]), array([0.33333333, 0.42857143, 0.5       , 0.4       , 0.5       ,
+           0.33333333, 0.5       , 0.        , 0.        ]), array([1.        , 1.        , 1.        , 0.66666667, 0.66666667,
+           0.33333333, 0.33333333, 0.        , 0.        ]))
 
     """
-    return _metric_curve(target_vec, score_vec, metric='f1')
+    assert 0 < scores.ndim <= 2, scores.shape
+    assert scores.shape == targets.shape, (scores.shape, targets.shape)
+    if scores.ndim == 2:
+        thresholds, f, p, r = list(zip(*[fscore_curve(t, s) for t, s in zip(targets.T, scores.T)]))
+        return np.array(thresholds).T, np.array(f).T, np.array(p).T, np.array(r).T
+    thresholds, n_pos, tps = _positives_curve(targets, scores)
+    n_ref = tps[0]
+    p = (tps + tp_bias) / np.maximum(n_pos + n_pos_bias, 1)
+    r = (tps + tp_bias) / np.maximum(n_ref + n_ref_bias, 1)
+    f = (1 + beta**2) * p * r / (beta**2*p+r+1e-18)
+    return thresholds, f, p, r
 
 
-def er_curve(target_vec, score_vec):
+def get_best_fscore_thresholds(targets, scores, beta=1., min_precision=0., min_recall=0., tp_bias=0, n_ref_bias=0, n_pos_bias=0):
+    """
+    >>> target_mat = np.array([[1.0], [1.0], [0.0], [1.0], [0.0], [0.0], [0.0], [0.0], [0.0]])
+    >>> score_mat = np.array([[0.6], [0.2], [0.5], [.4], [0.3], [0.1], [0.7], [0.0], [0.0]])
+    >>> get_best_fscore_thresholds(target_mat, score_mat)
+    (array([0.15]), array([0.66666667]), array([0.5]), array([1.]))
+    >>> get_best_fscore_thresholds(target_mat.flatten(), score_mat.flatten())
+    (0.15000000000000002, 0.6666666666666666, 0.5, 1.0)
+    >>> get_best_fscore_thresholds(target_mat.flatten(), score_mat.flatten(), min_precision=.5)
+    (0.15000000000000002, 0.6666666666666666, 0.5, 1.0)
+    >>> get_best_fscore_thresholds(target_mat.flatten(), score_mat.flatten(), min_precision=.51)
+    (inf, 0.0, 0.0, 0.0)
+    >>> get_best_fscore_thresholds(target_mat.flatten(), score_mat.flatten(), min_recall=1.0)
+    (0.15000000000000002, 0.6666666666666666, 0.5, 1.0)
+    >>> get_best_fscore_thresholds(target_mat.flatten(), score_mat.flatten(), tp_bias=1, n_ref_bias=1, n_pos_bias=1)
+    (0.15000000000000002, 0.6666666666666666, 0.5, 1.0)
+    """
+    thresholds, f, p, r = fscore_curve(targets, scores, beta, tp_bias=tp_bias, n_ref_bias=n_ref_bias, n_pos_bias=n_pos_bias)
+    assert min_precision == 0. or min_recall == 0.
+    f[p < min_precision] = 0.
+    f[r < min_recall] = 0.
+    best_idx = (-1-np.argmax(f[::-1], axis=0))
+    if thresholds.ndim == 1:
+        return thresholds[best_idx], f[best_idx], p[best_idx], r[best_idx]
+    elif thresholds.ndim == 2:
+        class_idx = np.arange(targets.shape[1])
+        return thresholds[best_idx, class_idx], f[best_idx, class_idx], p[best_idx, class_idx], r[best_idx, class_idx]
+    else:
+        raise AssertionError('ndim must be less equal 2.')
+
+
+def er_curve(targets, scores):
     """Given single-class soft scores computes error rate for each threshold between two adjacent score values.
 
     Args:
-        target_vec: binary targets indicating ground truth (num_instances,)
-        score_vec: binary classification scores (num_instances,)
+        targets: binary targets indicating ground truth (num_instances,)
+        scores: binary classification scores (num_instances,)
 
     Returns:
         error_rates: len(set(score_vec)+1) f1 error_rates
         thresholds: len(set(score_vec)+1) decision thresholds
 
     """
-    return _metric_curve(target_vec, score_vec, metric='er')
+    assert 0 < scores.ndim <= 2, scores.shape
+    assert scores.shape == targets.shape, (scores.shape, targets.shape)
+    if scores.ndim == 2:
+        thresholds, f, p, r = list(zip(*[er_curve(t, s) for t, s in zip(targets.T, scores.T)]))
+        return np.array(thresholds).T, np.array(f).T, np.array(p).T, np.array(r).T
+    thresholds, n_pos, tps = _positives_curve(targets, scores)
+    n_ref = tps[0]
+    i = n_pos - tps
+    d = n_ref - tps
+    er = (i+d) / np.maximum(n_ref, 1)
+    ir = i / np.maximum(n_ref, 1)
+    dr = d / np.maximum(n_ref, 1)
+    return thresholds, er, ir, dr
 
 
-def get_optimal_thresholds(target_mat, score_mat, metric):
-    """Given multi-class soft scores returns the optimal threshold for each class w.r.t. a provided metric.
-
-    Args:
-        target_mat: multi-hot matrix indicating ground truth
-            (num_instances, num_classes)
-        score_mat: classification scores for multi-label classification
-            (num_instances, num_classes)
-        metric: metric to be optimized \in {'f1', 'er'}
-
-    Returns:
-        thresholds: opitmal thresholds (num_classes,)
-        metric values: optimal metric values
-
-
+def get_best_er_thresholds(targets, scores, max_insertion_rate=None, max_deletion_rate=None):
+    """
     >>> target_mat = np.array([[1.0], [1.0], [0.0], [1.0], [0.0], [0.0], [0.0], [0.0], [0.0]])
     >>> score_mat = np.array([[0.6], [0.2], [0.5], [.4], [0.3], [0.1], [0.7], [0.0], [0.0]])
-    >>> get_optimal_thresholds(target_mat, score_mat, metric='f1')
-    (array([0.15]), array([0.66666667]))
+    >>> get_best_er_thresholds(target_mat, score_mat)
+    (array([inf]), array([1.]), array([0.]), array([1.]))
+    >>> get_best_er_thresholds(target_mat.flatten(), score_mat.flatten())
+    (inf, 1.0, 0.0, 1.0)
     """
-    thresholds = []
-    best_values = []
-    for label_idx in range(target_mat.shape[-1]):
-        target_vec = target_mat[:, label_idx]
-        score_vec = score_mat[:, label_idx]
-        if metric == 'f1':
-            cur_values, cur_thresholds = f1_curve(target_vec, score_vec)
-            best_idx = np.argmax(cur_values)
-        elif metric == 'er':
-            cur_values, cur_thresholds = er_curve(target_vec, score_vec)
-            best_idx = np.argmin(cur_values)
-        else:
-            raise NotImplementedError
-        best_values.append(cur_values[best_idx])
-        thresholds.append(cur_thresholds[best_idx])
-    return np.array(thresholds), np.array(best_values)
+    thresholds, er, ir, dr = er_curve(targets, scores)
+    if max_insertion_rate is not None:
+        er[ir > max_insertion_rate] = np.inf
+    if max_deletion_rate is not None:
+        er[dr > max_deletion_rate] = np.inf
+    best_idx = (-1-np.argmin(er[::-1], axis=0))
+    if thresholds.ndim == 1:
+        return thresholds[best_idx], er[best_idx], ir[best_idx], dr[best_idx]
+    elif thresholds.ndim == 2:
+        class_idx = np.arange(targets.shape[1])
+        return thresholds[best_idx, class_idx], er[best_idx, class_idx], ir[best_idx, class_idx], dr[best_idx, class_idx]
+    else:
+        raise AssertionError('ndim must be less equal 2.')

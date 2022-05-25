@@ -4,9 +4,10 @@
 ## Installation
 Install requirements:
 ```bash
-$ pip install --user git+https://github.com/fgnt/lazy_dataset.git@d500d23d23c0cc2ebb874c4974b4ffa7a2418b96
-$ pip install --user git+https://github.com/fgnt/paderbox.git@f0e7b0bf66a0ee6e5f51797305d84cf57227134d
-$ pip install --user git+https://github.com/fgnt/padertorch.git@9985d398c10ec086e18f7525c7e7dc2809c1e7f3
+$ pip install --user git+https://github.com/fgnt/padertorch.git@8f592c107d99cdbf8c3a5e2d7ca21373d2d3174a
+$ pip install --user git+https://github.com/fgnt/paderbox.git@809b27251c478f1997d2720b89fe455aac23234e
+$ pip install --user git+https://github.com/fgnt/lazy_dataset.git@057eb86609b4928da618ede36cc745cacc4d6ba1
+$ pip install --user git+https://github.com/fgnt/sed_scores_eval.git@475b83fdfcccd66508769dc14b8eb4d74740240b
 ```
 
 Clone the repository:
@@ -20,197 +21,132 @@ $ pip install --user -e pb_sed
 ```
 
 ## Database
-### DESED (DCASE 2020 Task 4)
+### DESED
 Install requirements:
 ```bash
-$ pip install --user git+https://github.com/turpaultn/DESED@2fb7fe0b4b33569ad3693d09e50037b8b4206b72
+$ pip install --user git+https://github.com/turpaultn/DESED@af3a5d5be9213239f42cf1c72f538e8058d8d2e4
 ```
 
 Download the database by running
 ```bash
 $ python -m pb_sed.database.desed.download -db /path/to/desed
 ```
-yielding the following database structure
+yielding the following database structure:
 
 ```
-├── real
-│   ├── audio
-│   │   ├── eval
-│   │   │   ├── eval_dcase2019
-│   │   │   └── eval_dcase2020
-│   │   ├── train
-│   │   │   ├── unlabel_in_domain
-│   │   │   └── weak
-│   │   └── validation
-│   │       └── validation
-│   ├── dataset
-│   │   ├── audio
-│   │   │   └── eval
-│   │   └── metadata
-│   │       └── eval
-│   ├── metadata
-│   │   ├── eval
-│   │   ├── train
-│   │   └── validation
-│   └── missing_files
-├── rir_data
+├── audio
+│   ├── eval
+│   │   └── public
+│   ├── train
+│   │   ├── unlabel_in_domain
+│   │   └── weak
+│   └── validation
+│       └── validation
+├── metadata
 │   ├── eval
 │   ├── train
 │   └── validation
-└── synthetic
-    ├── audio
-    │   ├── eval
-    │   │   └── soundbank
-    │   └── train
-    │       ├── soundbank
-    │       └── synthetic20
-    ├── dcase2019
-    │   └── dataset
-    │       ├── audio
-    │       └── metadata
-    └── metadata
-        └── train
-            └── synthetic20
-
+└── missing_files
 ```
+Follow the description in https://github.com/turpaultn/DESED to request missing
+files and copy them to the corresponding audio directories.
 
-Create json file (describing the database)
+Run
 ```bash
 $ python -m pb_sed.database.desed.create_json -db /path/to/desed
 ```
+to create the json files ```/path/to/pb_sed/jsons/desed.json```
+and ```/path/to/pb_sed/jsons/desed_pseudo_labeled.json``` (describing the database).
 
 ## Experiments
-### DCASE 2020 Task 4
-This repository provides the source code for the 3-rd place solution presented
-by Paderborn University for the [DCASE 2020 Challenge Task 4: Sound event detection and separation in domestic environments](http://dcase.community/challenge2020/task-sound-event-detection-and-separation-in-domestic-environments-results).
-Our submitted system achieved 48.3% and 47.2% event-based F1-score on the
-validation and evaluation sets, respectively.
-Later improvements led to 52.8% (+-0.6%) event-based F1-score on the
-validation set outperforming the winner of the challenge by 2.2% in average (comparison
-on evaluation set not possible as ground truth evaluation labels are not
-public).
+### DESED
+This repository provides source code advanced from our 3-rd rank and 4-th rank
+solutions for the [DCASE 2020 Challenge Task 4](http://dcase.community/challenge2020/task-sound-event-detection-and-separation-in-domestic-environments-results).
+and [DCASE 2021 Challenge Task 4](http://dcase.community/challenge2021/task-sound-event-detection-and-separation-in-domestic-environments-results), respectively.
+By now, however, we further improved our system performance. Changes made
+compared to [[1]](#1) are
+* additional time warping augmentation,
+* always full overlap superposition of clips (no shifted superposition),
+* reduced number of train steps in initial self-training iteration (w/o pseudo labels),
+* increased number of train steps in higher self-training iteration (w/ pseudo labels),
+* bigger ensembles (10 CRNNs) for pseudo labeling in each self-training iteration,
+* for strong pseudo-labeling: use hyper-params giving best collar-based F-score (rather than best frame-based F-score) on validation set.
+* do not mask SED scores by tag predictions for PSDS2
 
-For details see our paper "Forward-Backward Convolutional Recurrent Neural
-Networks and Tag-Conditioned Convolutional Neural Networks for Weakly Labeled
-Semi-Supervised Sound Event Detection"
-[\[pdf\]](http://dcase.community/documents/workshop2020/proceedings/DCASE2020Workshop_Ebbers_69.pdf).
-If you are using this code please cite our paper as follows:
+The resulting strongly pseudo-labeled datasets are also provided in this repo,
+which allow to train a CRNN ensemble achieving >55% PSDS1, >82% PSDS2 and >63%
+collar-based F1-score on the public evaluation set (when using FBCRNN ensemble
+for tagging and PSDS2 and strong label CRNN ensemble for collar-based F-score
+and PSDS1).
 
-```
-@inproceedings{Ebbers2020,
-    author = "Ebbers, Janek and Haeb-Umbach, Reinhold",
-    title = "Forward-Backward Convolutional Recurrent Neural Networks and Tag-Conditioned Convolutional Neural Networks for Weakly Labeled Semi-Supervised Sound Event Detection",
-    booktitle = "Proceedings of the Detection and Classification of Acoustic Scenes and Events 2020 Workshop (DCASE2020)",
-    address = "Tokyo, Japan",
-    month = "November",
-    year = "2020",
-    pages = "41--45"
-}
-```
+If you are using our system or our pseudo labels please consider citing this repository and our papers:
 
-#### FBCRNN
-To train a FBCRNN on only weakly labeled and synthetic data, run
+<a id="1">[1]</a> J.Ebbers and R. Haeb-Umbach,
+"Self-Trained Audio Tagging and Sound Event Detection in Domestic Environments",
+in Proc. Detection and Classification of Acoustic Scenes and Events 2021 Workshop (DCASE2021), 2021,
+
+<a id="2">[2]</a> J.Ebbers and R. Haeb-Umbach,
+"Forward-Backward Convolutional Recurrent Neural Networks and Tag-Conditioned Convolutional Neural Networks for Weakly Labeled Semi-Supervised Sound Event Detection",
+in Proc. Detection and Classification of Acoustic Scenes and Events 2020 Workshop (DCASE2020), 2020,
+
+
+#### Forward-Backward CRNN (FBCRNN)
+To train an FBCRNN from scratch on only weakly labeled and synthetic data, run
 ```bash
-$ python -m pb_sed.experiments.dcase_2020_task_4.train_crnn
-```
-
-The prepared DESED database already includes the following weakly pseudo
-labeled datasets.
-
-Pseudo weak labels used in our paper, i.e. generated by five different FBCRNN
-ensembles, which were only trained on weakly labeled and synthetic data:
-* unlabel_in_domain_pseudo_weak_2020-07-03-20-48-45
-* unlabel_in_domain_pseudo_weak_2020-07-03-20-49-48
-* unlabel_in_domain_pseudo_weak_2020-07-03-20-52-19
-* unlabel_in_domain_pseudo_weak_2020-07-03-21-00-48
-* unlabel_in_domain_pseudo_weak_2020-07-03-21-05-34
-
-Pseudo weak labels generated by the final FBCRNN ensembles from our paper, i.e.
-by five different FBCRNN ensembles trained on weakly labeled, synthetic and one
-of the weakly pseudo labeled data from above:
-* unlabel_in_domain_pseudo_weak_2020-07-04-13-10-05
-* unlabel_in_domain_pseudo_weak_2020-07-04-13-10-19
-* unlabel_in_domain_pseudo_weak_2020-07-04-13-10-33
-* unlabel_in_domain_pseudo_weak_2020-07-04-13-11-09
-* unlabel_in_domain_pseudo_weak_2020-07-04-13-12-06
-
-To train an FBCRNN leveraging, e.g.,
-unlabel_in_domain_pseudo_weak_2020-07-04-13-10-05, run
-```bash
-$ python -m pb_sed.experiments.dcase_2020_task_4.train_crnn with 'unlabel_in_domain_pseudo_weak_timestamp=2020-07-04-13-10-05'
+$ python -m pb_sed.experiments.weak_label_crnn.training
 ```
 Each training stores checkpoints and metadata (incl. a tensorboard event file)
-in a directory ```/path/to/storage_root/dcase_2020_crnn/<timestamp>```.
-
-#### Tag-conditioned CNN
-To train a tag-conditioned CNN pseudo strong labels are required.
-The prepared DESED database already includes the following strongly pseudo
-labeled datasets.
-
-Pseudo strong labels used in our paper, i.e. generated by five different FBCRNN
-ensembles which were trained on weakly labeled, synthetic and one of the weakly
-pseudo labeled unlabeled data from above:
-* weak_pseudo_strong_2020-07-04-13-10-05_best_frame_f1_crnn
-* weak_pseudo_strong_2020-07-04-13-10-19_best_frame_f1_crnn
-* weak_pseudo_strong_2020-07-04-13-10-33_best_frame_f1_crnn
-* weak_pseudo_strong_2020-07-04-13-11-09_best_frame_f1_crnn
-* weak_pseudo_strong_2020-07-04-13-12-06_best_frame_f1_crnn
-* unlabel_in_domain_pseudo_strong_2020-07-04-13-10-05_best_frame_f1_crnn
-* unlabel_in_domain_pseudo_strong_2020-07-04-13-10-19_best_frame_f1_crnn
-* unlabel_in_domain_pseudo_strong_2020-07-04-13-10-33_best_frame_f1_crnn
-* unlabel_in_domain_pseudo_strong_2020-07-04-13-11-09_best_frame_f1_crnn
-* unlabel_in_domain_pseudo_strong_2020-07-04-13-12-06_best_frame_f1_crnn
-
-Pseudo strong labels generated by five different Hybrid ensembles
-(4 FBCRNN + 4 tag-conditioned CNNs) from our paper, where CNNs were trained on
-a pair of strongly pseudo labeled weak and unlabeled data from above plus
-synthetic data:
-* weak_pseudo_strong_2020-07-05-12-37-18_best_frame_f1_hybrid
-* weak_pseudo_strong_2020-07-05-12-37-26_best_frame_f1_hybrid
-* weak_pseudo_strong_2020-07-05-12-37-35_best_frame_f1_hybrid
-* weak_pseudo_strong_2020-07-05-12-37-45_best_frame_f1_hybrid
-* weak_pseudo_strong_2020-07-05-12-37-54_best_frame_f1_hybrid
-* unlabel_in_domain_pseudo_strong_2020-07-05-12-37-18_best_frame_f1_hybrid
-* unlabel_in_domain_pseudo_strong_2020-07-05-12-37-26_best_frame_f1_hybrid
-* unlabel_in_domain_pseudo_strong_2020-07-05-12-37-35_best_frame_f1_hybrid
-* unlabel_in_domain_pseudo_strong_2020-07-05-12-37-45_best_frame_f1_hybrid
-* unlabel_in_domain_pseudo_strong_2020-07-05-12-37-54_best_frame_f1_hybrid
-
-To train a tag conditioned CNN run, e.g.,
+in a directory ```/path/to/storage_root/weak_label_crnn_training/<group_timestamp>/<model_timestamp>```.
+By default, ```/path/to/storage_root``` is ```/path/to/pb_sed/exp``` but can be
+changed by setting an environment variable
 ```bash
-$ python -m pb_sed.experiments.dcase_2020_task_4.train_cnn with 'pseudo_strong_suffix=2020-07-05-12-37-18_best_frame_f1_hybrid'
+$ export STORAGE_ROOT=/path/to/custom/storage_root
+```
+
+To train a second model and add it to an existing group (ensemble), run
+```bash
+$ python -m pb_sed.experiments.weak_label_crnn.training with group_name=<group_timestamp>
+```
+
+To train on our provided pseudo labeled data instead, add
+```data_provider.json_path=/path/to/pb_sed/jsons/desed_pseudo_labeled.json```
+and ```data_provider.train_set.train_unlabel_in_domain=2``` to the command, e.g.:
+```bash
+$ python -m pb_sed.experiments.weak_label_crnn.training with data_provider.json_path=/path/to/pb_sed/jsons/desed_pseudo_labeled.json data_provider.train_set.train_unlabel_in_domain=2
+```
+
+For hyper-parameter tuning, run
+```bash
+$ python -m pb_sed.experiments.weak_label_crnn.tuning with group_dir=/path/to/storage_root/weak_label_crnn_training/<group_timestamp>
+```
+which saves hyper-parameters in a directory ```/path/to/storage_root/weak_label_crnn_hyper_params/<timestamp>```.
+
+For evaluation on the public evaluation set, run
+```bash
+$ python -m pb_sed.experiments.weak_label_crnn.inference with hyper_params_dir=/path/to/storage_root/weak_label_crnn_hyper_params/<timestamp>
+```
+
+
+#### Strong label CRNN
+To train a CRNN with our provided strong pseudo labels, run
+```bash
+$ python -m pb_sed.experiments.strong_label_crnn.training with weak_label_crnn_hyper_params_dir=/path/to/storage_root/weak_label_crnn_hyper_params/<timestamp>
 ```
 Each training stores checkpoints and metadata (incl. a tensorboard event file)
-in a directory ```/path/to/storage_root/dcase_2020_cnn/<timestamp>```.
+in a directory ```/path/to/storage_root/strong_label_crnn_training/<group_timestamp>/<model_timestamp>```.
 
-#### Hyper parameter tuning
-To tune hyper-parameters, namely, decision thresholds, median-filter sizes and
-context length for FBCRNN-based SED run
+To train a second model and add it to an existing group (ensemble), run
 ```bash
-$ python -m pb_sed.experiments.dcase_2020_task_4.tune_hyper_params with 'crnn_dirs=["/path/to/storage_root/dcase_2020_crnn/<timestamp_crnn_1>","/path/to/storage_root/dcase_2020_crnn/<timestamp_crnn_2>",...]' 'cnn_dirs=["/path/to/storage_root/dcase_2020_cnn/<timestamp_cnn_1>","/path/to/storage_root/dcase_2020_cnn/<timestamp_cnn_2>",...]'
+$ python -m pb_sed.experiments.strong_label_crnn.training with weak_label_crnn_hyper_params_dir=/path/to/storage_root/weak_label_crnn_hyper_params/<timestamp> group_name=<group_timestamp>
 ```
-Hyper parameters are stored in an output directory
-```/path/to/storage_root/dcase_2020_hyper_params/<timestamp>```.
 
-#### Evaluation / Inference
-To perform evaluation run
+For hyper-parameter tuning, run
 ```bash
-$ python -m pb_sed.experiments.dcase_2020_task_4.run_inference with 'hyper_params_dir=/path/to/storage_root/dcase_2020_hyper_params/<timestamp>' 'dataset_names=["validation", "eval_dcase2019"]' 'reference_files=["/path/to/desed/real/metadata/validation/validation.tsv", "/path/to/desed/real/metadata/eval/eval_dcase2019.tsv"]'
+$ python -m pb_sed.experiments.strong_label_crnn.tuning with strong_label_crnn_group_dir=/path/to/storage_root/strong_label_crnn_training/<group_timestamp> weak_label_crnn_hyper_params_dir=/path/to/storage_root/weak_label_crnn_hyper_params/<timestamp>
 ```
-To perform inference and write prediction files (pseudo labels) for other data
-sets, run
+which saves hyper-parameters in a directory ```/path/to/storage_root/strong_label_crnn_hyper_params/<timestamp>```.
+
+For evaluation on the public evaluation set, run
 ```bash
-$ python -m pb_sed.experiments.dcase_2020_task_4.run_inference with 'hyper_params_dir=/path/to/storage_root/dcase_2020_hyper_params/<timestamp>' 'dataset_names=["weak", "unlabel_in_domain", "eval_dcase2020"]'
-```
-For all-in-one inference+evaluation, run:
-```bash
-$ python -m pb_sed.experiments.dcase_2020_task_4.run_inference with 'hyper_params_dir=/path/to/storage_root/dcase_2020_hyper_params/<timestamp>' 'dataset_names=["validation", "eval_dcase2019", "weak", "unlabel_in_domain", "eval_dcase2020"]' 'reference_files=["/path/to/desed/real/metadata/validation/validation.tsv", "/path/to/desed/real/metadata/eval/eval_dcase2019.tsv", None, None, None]'
-```
-Predictions are stored as tsv-files in an output directory
-```/path/to/storage_root/dcase_2020_inference/<timestamp>```.
-To add a custom pseudo labeled data set to the DESED database copy an event
-file to the database's metadata and rerun create_json, e.g.:
-```bash
-$ cp /path/to/storage_root/dcase_2020_inference/<timestamp>/unlabel_in_domain_<timestamp>_best_frame_f1_hybrid.tsv /path/to/desed/real/metadata/train/
-$ python -m pb_sed.database.desed.create_json -db /path/to/desed
+$ python -m pb_sed.experiments.strong_label_crnn.inference with strong_label_crnn_hyper_params_dir=/path/to/storage_root/strong_label_crnn_hyper_params/<timestamp>
 ```

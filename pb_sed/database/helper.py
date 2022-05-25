@@ -1,10 +1,10 @@
 
 import soundfile
 import concurrent.futures
-import itertools
+from tqdm import tqdm
 
 
-def prepare_sound_dataset(examples, max_examples=int(1e12), postprocess_fn=None):
+def prepare_sound_dataset(examples, postprocess_fn=None):
     """
     filters unavailable audio files and adds audio length to examples
     Args:
@@ -16,17 +16,18 @@ def prepare_sound_dataset(examples, max_examples=int(1e12), postprocess_fn=None)
 
     """
     dataset = {}
+    missing = set()
     with concurrent.futures.ThreadPoolExecutor() as ex:
-        for _, example_id, example in itertools.islice(
-                filter(
-                    lambda x: x[0], ex.map(prepare_sound_example, examples.items())
-                ),
-                max_examples
+        for available, example_id, example in tqdm(
+                ex.map(prepare_sound_example, examples.items()),
+                total=len(examples)
         ):
+            if not available:
+                missing.add(example_id)
             if postprocess_fn is not None:
                 example = postprocess_fn(example)
             dataset[example_id] = example
-    return dataset
+    return dataset, missing
 
 
 def prepare_sound_example(item: (str, dict)) -> (bool, str, dict):
@@ -44,4 +45,5 @@ def prepare_sound_example(item: (str, dict)) -> (bool, str, dict):
         example['audio_length'] = length
         return True, example_id, example
     else:
-        return False, example_id, None
+        example.pop('audio_path')
+        return False, example_id, example

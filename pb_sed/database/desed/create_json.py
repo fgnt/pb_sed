@@ -1,8 +1,8 @@
 """
-This script prepares a json file comprising information about the DESED
+This script prepares json files comprising information about the DESED
 database. Information about the database can be found here:
 
-https://project.inria.fr/desed/dcase-challenge/dcase-2020-task-4/
+https://github.com/turpaultn/DESED
 
 For each audio clip a dict is stored containing the following keys:
 audio_path: path to audio file
@@ -17,13 +17,28 @@ Example usage:
 python -m pb_sed.database.desed.create_json -db /path/to/desed
 """
 
+import pandas as pd
 from natsort import natsorted
 from pathlib import Path
-from collections import defaultdict
 import click
 from paderbox.io.json_module import dump_json
-from pb_sed.paths import database_jsons_dir
+from pb_sed.paths import database_jsons_dir, pb_sed_root
 from pb_sed.database.helper import prepare_sound_dataset
+from sed_scores_eval import io
+
+
+target_events = [
+    'Alarm_bell_ringing',
+    'Blender',
+    'Cat',
+    'Dishes',
+    'Dog',
+    'Electric_shaver_toothbrush',
+    'Frying',
+    'Running_water',
+    'Speech',
+    'Vacuum_cleaner',
+]
 
 
 def construct_json(database_path):
@@ -38,67 +53,51 @@ def construct_json(database_path):
     database = {
         'datasets': dict()
     }
-
-    # desed_real
-    real_dataset_path = database_path/'real'
+    audio_lengths = dict()
     for purpose in ['train', 'validation', 'eval']:
-        files = sorted((real_dataset_path / 'metadata' / purpose).glob('*.tsv'))
-        for segment_file in files:
-            name = segment_file.name[:-len('.tsv')]
-            audio_dir = real_dataset_path / 'audio' / purpose
-            if '_pseudo_' in name:
-                audio_dir = audio_dir / name.split('_pseudo_')[0]
+        audio_base_dir = database_path / 'audio' / purpose
+        for subdir in audio_base_dir.iterdir():
+            name = subdir.name
+            if name == purpose:
+                dataset_name = purpose
             else:
-                audio_dir = audio_dir / name
-            segment_ids = read_segments_file(segment_file)
+                dataset_name = f'{purpose}_{name}'
+            ground_truth_file = database_path / 'metadata' / purpose / f"{name}.tsv"
+            audio_dir = audio_base_dir / name
+            if ground_truth_file.exists() and name != 'unlabel_in_domain':
+                ground_truth = read_ground_truth_file(ground_truth_file)
+                clip_ids = ground_truth.keys()
+            else:
+                ground_truth = None
+                clip_ids = [audio_file.name[:-len(".wav")] for audio_file in audio_dir.glob("*.wav")]
             examples = {}
-            for segment_id in natsorted(segment_ids):
-                audio_path = Path(audio_dir)/f'{segment_id}.wav'
-                examples[segment_id] = {
+            for clip_id in natsorted(clip_ids):
+                audio_path = Path(audio_dir) / f'{clip_id}.wav'
+                examples[clip_id] = {
                     'audio_path': str(audio_path),
                 }
-                if isinstance(segment_ids, dict):
-                    events = segment_ids[segment_id]
-                    if len(events) > 0 and isinstance(events[0], (list, tuple)):
-                        events, event_onsets, event_offsets = list(zip(*events))
-                        examples[segment_id][f'events_start_times'] = event_onsets
-                        examples[segment_id][f'events_stop_times'] = event_offsets
-                    elif purpose == "validation" and len(events) == 0:
-                        examples[segment_id][f'events_start_times'] = []
-                        examples[segment_id][f'events_stop_times'] = []
-                    examples[segment_id]['events'] = events
-            database['datasets'][name] = prepare_sound_dataset(examples)
+            if 'synthetic' in name or dataset_name in ['validation', 'eval_public']:
+                assert ground_truth is not None
+                add_strong_labels(examples, ground_truth)
+            elif ground_truth:
+                assert dataset_name == 'train_weak', name
+                add_weak_labels(examples, ground_truth)
+            database['datasets'][dataset_name], _ = prepare_sound_dataset(examples)
+            audio_lengths[dataset_name] = {
+                example_id: example['audio_length']
+                for example_id, example in database['datasets'][dataset_name].items()
+            }
 
             print(
-                f'{len(segment_ids) - len(database["datasets"][name])} '
-                f'from {len(segment_ids)} files missing in {name}.'
+                f'{len(clip_ids) - len(database["datasets"][dataset_name])}'
+                f' from {len(clip_ids)} files missing in {dataset_name}.'
             )
-
-    # desed_synthetic
-    synthetic_dataset_path = database_path/'synthetic'
-    audio_dir = synthetic_dataset_path/'audio'/'train'/'synthetic20'/'soundscapes'
-    segment_ids = read_segments_file(synthetic_dataset_path/'audio'/'train'/'synthetic20'/'soundscapes.tsv')
-    examples = {}
-    for segment_id in natsorted(segment_ids):
-        audio_path = audio_dir/f'{segment_id}.wav'
-        examples[segment_id] = {
-            'audio_path': str(audio_path),
-        }
-        assert isinstance(segment_ids, dict), type(segment_ids)
-        events = segment_ids[segment_id]
-        if len(events) > 0 and isinstance(events[0], (list, tuple)):
-            events, event_onsets, event_offsets = list(zip(*events))
-            examples[segment_id][f'events_start_times'] = event_onsets
-            examples[segment_id][f'events_stop_times'] = event_offsets
-        elif len(events) == 0:
-            examples[segment_id][f'events_start_times'] = []
-            examples[segment_id][f'events_stop_times'] = []
-        examples[segment_id]['events'] = events
-    database['datasets'][f'synthetic'] = prepare_sound_dataset(examples)
-    print(
-        f'{len(segment_ids) - len(database["datasets"]["synthetic"])} '
-        f'from {len(segment_ids)} files missing in synthetic'
-    )
+            events = {
+                event
+                for example in database["datasets"][dataset_name].values()
+                for event in example.get('events', [])
+            }
+            print(f'Number of event labels in {dataset_name}:', len(events))
 
     events = {
         event
@@ -107,100 +106,74 @@ def construct_json(database_path):
         for event in example.get('events', [])
     }
     print('Number of event labels:', len(events))
-
-    # fuss
-    # fuss_fsd_data_dir = database_path / 'fsd_data'
-    # for txt_file in fuss_fsd_data_dir.glob('*.txt'):
-    #     ds_name = txt_file.name[:-len('.txt')]
-    #     examples = {}
-    #     with txt_file.open() as fid:
-    #         for audio_file in fid.read().splitlines():
-    #             audio_file = fuss_fsd_data_dir / Path(audio_file)
-    #             audio_id = audio_file.name[:-len('.wav')]
-    #             examples[audio_id] = {
-    #                 'audio_path': str(audio_file)
-    #             }
-    #     database['datasets'][f'fuss_{ds_name}'] = prepare_sound_dataset(
-    #         examples
-    #     )
-    #
-    # for ss_dir in ['ssdata', 'ssdata_reverb']:
-    #     ss_dir = database_path / ss_dir
-    #     for ds in ['train', 'validation', 'eval']:
-    #         examples = {}
-    #         for audio_file in (ss_dir / ds).glob('*.wav'):
-    #             example_id = audio_file.name[:-len('.wav')]
-    #
-    #             examples[example_id] = {
-    #                 'audio_path': str(audio_file),
-    #             }
-    #         examples = prepare_sound_dataset(examples)
-    #         for example_id, example in examples.items():
-    #             examples[example_id]['audio_path'] = {
-    #                 'observation': example['audio_path'],
-    #                 'background': str(ss_dir / ds / f'{example_id}_sources' / 'background0_sound.wav'),
-    #                 'sources': sorted([str(src) for src in (ss_dir / ds / f'{example_id}_sources').glob('foreground*_sound.wav')]),
-    #             }
-    #         database['datasets'][f'fuss_{ss_dir.name}_{ds}'] = examples
-
-    rir_dir = database_path / 'rir_data'
-    for ds in rir_dir.iterdir():
-        rooms = {}
-        for room in (rir_dir / ds).iterdir():
-            room_id = room.name.split('_')[1]
-            rooms[room_id] = {
-                'rirs': sorted([str(rir) for rir in room.glob('*.wav')])
-            }
-        database['datasets'][f'rir_data_{ds.name}'] = rooms
     return database
 
 
-def read_segments_file(segment_file):
-    examples = None
-    with segment_file.open() as fid:
-        for row in fid.read().splitlines()[1:]:
-            row = row.split('\t')
-            example_id = row[0][:-len('.wav')]
-            if len(row) == 1:
-                if examples is None:
-                    examples = []
-                else:
-                    assert isinstance(examples, list)
-                examples.append(example_id)
-            elif len(row) == 2:
-                if examples is None:
-                    examples = defaultdict(list)
-                else:
-                    assert isinstance(examples, dict)
-                examples[example_id].extend(row[1].split(','))
-            elif len(row) == 4:
-                if examples is None:
-                    examples = defaultdict(list)
-                else:
-                    assert isinstance(examples, defaultdict)
-                if len(row[3]) > 0:
-                    examples[example_id].append(
-                        [row[3], float(row[1]), float(row[2])]
-                    )
-                else:
-                    examples[example_id] = []
-            else:
-                raise Exception
+def read_ground_truth_file(filepath):
+    file = pd.read_csv(filepath, sep='\t')
+    if 'onset' in file.columns:
+        # events
+        return io.read_ground_truth_events(filepath)
+    return io.read_ground_truth_tags(filepath)[0]
+
+
+def add_strong_labels(examples, events):
+    for clip_id in examples:
+        event_list = events[clip_id]
+        if len(event_list) > 0:
+            assert isinstance(event_list[0], (list, tuple)), event_list
+            event_list = [event for event in event_list if event[2] in target_events]
+            event_onsets, event_offsets, event_list = list(zip(*event_list))
+        else:
+            event_onsets, event_offsets, event_list = [], [], []
+        examples[clip_id][f'events_start_times'] = event_onsets
+        examples[clip_id][f'events_stop_times'] = event_offsets
+        examples[clip_id]['events'] = event_list
     return examples
 
 
-def create_json(database_path: Path, json_path: Path, indent=4):
+def add_weak_labels(examples, events):
+    for clip_id in examples:
+        event_list = events[clip_id]
+        if len(event_list) > 0 and isinstance(event_list[0], (list, tuple)):
+            event_list = [event for event in event_list if event[2] in target_events]
+            event_onsets, event_offsets, event_list = list(zip(*event_list))
+        examples[clip_id]['events'] = [
+            event for event in event_list if event in target_events
+        ]
+    return examples
+
+
+def create_jsons(database_path: Path, json_path: Path, indent=4):
     assert database_path.is_dir(), (
         f'Path "{str(database_path.absolute())}" is not a directory.'
     )
     database = construct_json(database_path)
     dump_json(
         database,
-        json_path,
+        json_path / 'desed.json',
         create_path=True,
         indent=indent,
         ensure_ascii=False,
     )
+    print(f'Dumped json {json_path / "desed.json"}')
+    pseudo_labels_dir = pb_sed_root / 'exp' / 'strong_label_crnn_inference' / '2022-05-04-09-05-53'
+    add_strong_labels(
+        database['datasets']['train_weak'],
+        read_ground_truth_file(pseudo_labels_dir / 'train_weak_pseudo_labeled.tsv')
+    )
+    add_strong_labels(
+        database['datasets']['train_unlabel_in_domain'],
+        read_ground_truth_file(pseudo_labels_dir / 'train_unlabel_in_domain_pseudo_labeled.tsv')
+    )
+    dump_json(
+        database,
+        json_path / 'desed_pseudo_labeled.json',
+        create_path=True,
+        indent=indent,
+        ensure_ascii=False,
+    )
+    print(f'Dumped json {json_path / "desed_pseudo_labeled.json"}')
 
 
 @click.command()
@@ -211,14 +184,13 @@ def create_json(database_path: Path, json_path: Path, indent=4):
 )
 @click.option(
     '--json-path', '-j',
-    default=str(database_jsons_dir / 'desed.json'),
-    help=f'Output path for the generated JSON file. If the file exists, it '
-         f'gets overwritten. Defaults to '
-         f'"{database_jsons_dir / "desed.json"}".',
-    type=click.Path(dir_okay=False, writable=True),
+    default=str(database_jsons_dir),
+    help=f'Directory path where to save the generated JSON files. If a file '
+         f'already exists, it gets overwritten. Defaults to "{database_jsons_dir}".',
+    type=click.Path(),
 )
 def main(database_path, json_path):
-    create_json(Path(database_path), Path(json_path))
+    create_jsons(Path(database_path).absolute(), Path(json_path).absolute())
 
 
 if __name__ == "__main__":
