@@ -45,20 +45,20 @@ class DataProvider(Configurable):
         assert self.json_path is not None
         self.db = JsonDatabase(json_path=self.json_path)
 
-    def get_train_set(self):
-        return self.get_dataset(self.train_set, train=True)
+    def get_train_set(self, filter_example_ids=None):
+        return self.get_dataset(self.train_set, train=True, filter_example_ids=filter_example_ids)
 
-    def get_validate_set(self):
-        return self.get_dataset(self.validate_set, train=False)
+    def get_validate_set(self, filter_example_ids=None):
+        return self.get_dataset(self.validate_set, train=False, filter_example_ids=filter_example_ids)
 
-    def get_dataset(self, dataset_names_or_raw_datasets, train=False):
-        ds = self.prepare_audio(dataset_names_or_raw_datasets, train=train)
+    def get_dataset(self, dataset_names_or_raw_datasets, train=False, filter_example_ids=None):
+        ds = self.prepare_audio(dataset_names_or_raw_datasets, train=train, filter_example_ids=filter_example_ids)
         ds = self.segment_transform_and_fetch(ds, train=train)
         return ds
 
-    def prepare_audio(self, dataset_names_or_raw_datasets, train=False):
+    def prepare_audio(self, dataset_names_or_raw_datasets, train=False, filter_example_ids=None):
         individual_audio_datasets = self._load_audio(
-            dataset_names_or_raw_datasets, train=train)
+            dataset_names_or_raw_datasets, train=train, filter_example_ids=filter_example_ids)
         if not isinstance(individual_audio_datasets, list):
             assert isinstance(individual_audio_datasets, lazy_dataset.Dataset), type(individual_audio_datasets)
             individual_audio_datasets = [(individual_audio_datasets, 1)]
@@ -69,6 +69,7 @@ class DataProvider(Configurable):
             raw_datasets = self.get_raw(
                 dataset_names_or_raw_datasets,
                 discard_labelless_examples=self.discard_labelless_train_examples,
+                filter_example_ids=filter_example_ids,
             )
             label_counts, labels = self._count_labels(
                 raw_datasets, self.label_key)
@@ -86,7 +87,7 @@ class DataProvider(Configurable):
         print(f'Total data set length:', len(dataset))
         return dataset
 
-    def _load_audio(self, dataset_names_or_raw_datasets, train=False, idx=None):
+    def _load_audio(self, dataset_names_or_raw_datasets, train=False, filter_example_ids=None, idx=None):
         if isinstance(dataset_names_or_raw_datasets, (dict, list, tuple)):
             ds = []
             for i, name_or_ds in enumerate(dataset_names_or_raw_datasets):
@@ -102,7 +103,7 @@ class DataProvider(Configurable):
                     self._load_audio(
                         name_or_ds[0] if isinstance(name_or_ds, (list, tuple))
                         else name_or_ds,
-                        train=train, idx=i,
+                        train=train, filter_example_ids=filter_example_ids, idx=i,
                     ),
                     num_reps
                 ))
@@ -111,7 +112,8 @@ class DataProvider(Configurable):
             dataset_names_or_raw_datasets,
             discard_labelless_examples=(
                 train and self.discard_labelless_train_examples
-            )
+            ),
+            filter_example_ids=filter_example_ids,
         ).map(self.audio_reader)
         cache = (
             self.cached_datasets is not None
@@ -132,25 +134,30 @@ class DataProvider(Configurable):
 
     def get_raw(
             self, dataset_names_or_raw_datasets,
-            discard_labelless_examples=False
+            discard_labelless_examples=False,
+            filter_example_ids=None,
     ):
         if isinstance(dataset_names_or_raw_datasets, (dict, list, tuple)):
-            return [
-                (
-                    self.get_raw(
-                        name_or_ds[0] if isinstance(name_or_ds, (list, tuple))
-                        else name_or_ds,
-                        discard_labelless_examples=discard_labelless_examples,
-                    ),
+            return list(filter(
+                lambda x: x[1] > 0,
+                [
                     (
-                        dataset_names_or_raw_datasets[name_or_ds]
-                        if isinstance(dataset_names_or_raw_datasets, dict)
-                        else name_or_ds[1] if isinstance(name_or_ds, (list, tuple))
-                        else 1
-                    ),
-                )
-                for name_or_ds in dataset_names_or_raw_datasets
-            ]
+                        self.get_raw(
+                            name_or_ds[0] if isinstance(name_or_ds, (list, tuple))
+                            else name_or_ds,
+                            discard_labelless_examples=discard_labelless_examples,
+                            filter_example_ids=filter_example_ids,
+                        ),
+                        (
+                            dataset_names_or_raw_datasets[name_or_ds]
+                            if isinstance(dataset_names_or_raw_datasets, dict)
+                            else name_or_ds[1] if isinstance(name_or_ds, (list, tuple))
+                            else 1
+                        ),
+                    )
+                    for name_or_ds in dataset_names_or_raw_datasets
+                ]
+            ))
         elif isinstance(dataset_names_or_raw_datasets, str):
             ds = self.db.get_dataset(dataset_names_or_raw_datasets)
         else:
@@ -161,8 +168,12 @@ class DataProvider(Configurable):
                 lambda ex: self.label_key in ex and ex[self.label_key],
                 lazy=False
             )
+        if filter_example_ids is not None:
+            ds = ds.filter(
+                lambda ex: ex['example_id'] not in filter_example_ids, lazy=False
+            )
         return ds.filter(
-            lambda ex: ex['audio_length'] > self.min_audio_length, lazy=False
+            lambda ex: 'audio_length' in ex and ex['audio_length'] > self.min_audio_length, lazy=False
         )
 
     @staticmethod
@@ -330,8 +341,8 @@ class DataProvider(Configurable):
             'prefetch_workers': 16,
             'batch_size': 16,
             'max_padding_rate': .05,
-            'global_shuffle': False,  # already shuffled in prepare_audio
             'drop_incomplete': True,
+            'global_shuffle': False,  # already shuffled in prepare_audio
         }
         config['train_fetcher']['bucket_expiration'] = (
             2000 * config['train_fetcher']['batch_size'])
@@ -340,8 +351,9 @@ class DataProvider(Configurable):
             'prefetch_workers': config['train_fetcher']['prefetch_workers'],
             'batch_size': 2 * config['train_fetcher']['batch_size'],
             'max_padding_rate': config['train_fetcher']['max_padding_rate'],
-            'global_shuffle': False,
+            'bucket_expiration': config['train_fetcher']['bucket_expiration'],
             'drop_incomplete': False,
+            'global_shuffle': False,
         }
         config['scale_sampling_fn'] = {
             'factory': LogTruncatedNormal,

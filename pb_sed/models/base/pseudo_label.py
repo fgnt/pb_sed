@@ -1,4 +1,5 @@
 import numpy as np
+from copy import deepcopy
 
 
 def pseudo_label(
@@ -8,6 +9,7 @@ def pseudo_label(
 ):
     if not any([pseudo_tags, pseudo_boundaries, pseudo_events]):
         return dataset
+    dataset = deepcopy(dataset)
     assert not (pseudo_events and pseudo_boundaries)
     for audio_id in sorted(dataset.keys()):
         if pseudo_tags:

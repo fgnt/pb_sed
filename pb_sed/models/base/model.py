@@ -7,10 +7,11 @@ from sklearn import metrics
 
 
 class SoundEventModel(Model, abc.ABC):
-    def __init__(self, *, labelwise_metrics=(), label_mapping=None):
+    def __init__(self, *, labelwise_metrics=(), label_mapping=None, test_labels=None):
         super().__init__()
         self.labelwise_metrics = labelwise_metrics
         self.label_mapping = label_mapping
+        self.test_labels = test_labels
 
     @abc.abstractmethod
     def tagging(self, inputs, **params):
@@ -48,9 +49,19 @@ class SoundEventModel(Model, abc.ABC):
         summary['scalars'][f'num_examples_{suffix}'] = len(y)
         targets = np.concatenate(summary['buffers'].pop(f'targets_{suffix}'))
 
+        test_labels = self.test_labels
+        if test_labels is not None:
+            if isinstance(test_labels[0], str):
+                assert self.label_mapping is not None
+                test_labels = [self.label_mapping.index(label) for label in test_labels]
+            y = y[..., test_labels]
+            targets = targets[..., test_labels]
+
         def maybe_add_label_wise(key, values):
             if key in self.labelwise_metrics:
                 for event_class, value in enumerate(values):
+                    if test_labels is not None:
+                        event_class = test_labels[event_class]
                     if self.label_mapping is not None:
                         event_class = self.label_mapping[event_class]
                     summary['scalars'][f'z/{key}/{event_class}'] = value
@@ -63,7 +74,7 @@ class SoundEventModel(Model, abc.ABC):
         summary['scalars'][f'macro_error_rate_{suffix}'] = er.mean()
         maybe_add_label_wise(f'error_rate_{suffix}', er)
 
-        lwlrap, per_class_lwlrap = instance_based.lwlrap(targets, y)
+        lwlrap, per_class_lwlrap, weight_per_class = instance_based.lwlrap(targets, y)
         summary['scalars'][f'lwlrap_{suffix}'] = lwlrap
         maybe_add_label_wise(f'lwlrap_{suffix}', per_class_lwlrap)
 

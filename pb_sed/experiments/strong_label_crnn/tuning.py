@@ -8,7 +8,6 @@ from sacred.commands import print_config
 
 from paderbox.utils.timer import timeStamped
 from paderbox.io.json_module import load_json, dump_json
-from sed_scores_eval import io
 from sed_scores_eval import collar_based
 
 from pb_sed.paths import storage_root
@@ -28,8 +27,6 @@ ex = Exp(ex_name)
 def config():
     debug = False
     timestamp = timeStamped('')[1:] + ('_debug' if debug else '')
-    storage_dir = str(storage_root / ex_name / timestamp)
-    assert not Path(storage_dir).exists()
 
     weak_label_crnn_hyper_params_dir = ''
     assert len(weak_label_crnn_hyper_params_dir) > 0, 'Set weak_label_crnn_hyper_params_dir on the command line.'
@@ -50,8 +47,12 @@ def config():
     strong_label_crnn_checkpoints = 'ckpt_best_macro_fscore_strong.pth'
     strong_crnn_config = load_json(Path(strong_label_crnn_dirs[0]) / '1' / 'config.json')
     data_provider = strong_crnn_config['data_provider']
+    database_name = strong_crnn_config.get('database_name', 'desed')
+    storage_dir = str(storage_root / 'strong_label_crnn' / database_name / 'hyper_params' / timestamp)
+    assert not Path(storage_dir).exists()
     del strong_crnn_config
     data_provider['min_audio_length'] = .01
+    data_provider['cached_datasets'] = None
 
     device = 0
 
@@ -116,7 +117,7 @@ def main(
         audio_id: np.array([0., audio_durations[audio_id]])
         for audio_id in audio_durations
     }
-    tags, _ = tagging(
+    tags, tagging_scores, _ = tagging(
         weak_label_crnns, dataset, device, timestamps, event_classes,
         weak_label_crnn_hyper_params_dir, None, None,
     )
@@ -183,24 +184,23 @@ def main(
         medfilt_lengths=medfilt_lengths,
     )
     dump_json(leaderboard['f'][1], storage_dir / f'sed_hyper_params_f.json')
-    io.write_score_transform(
-        scores=leaderboard['f'][2],
-        ground_truth=validation_ground_truth_filepath,
-        filepath=storage_dir / f'sed_score_transform_f.tsv',
-    )
-    dump_json(leaderboard['auc1'][1], storage_dir / 'sed_hyper_params_psds1.json')
-    io.write_score_transform(
+    f, p, r, thresholds, _ = collar_based.best_fscore(
         scores=leaderboard['auc1'][2],
         ground_truth=validation_ground_truth_filepath,
-        filepath=storage_dir / f'sed_score_transform_psds1.tsv',
+        **collar_based_params, num_jobs=8
     )
-    dump_json(leaderboard['auc2'][1], storage_dir / 'sed_hyper_params_psds2.json')
-    io.write_score_transform(
+    for event_class in thresholds:
+        leaderboard['auc1'][1][event_class]['threshold'] = thresholds[event_class]
+    dump_json(leaderboard['auc1'][1], storage_dir / 'sed_hyper_params_psds1.json')
+    f, p, r, thresholds, _ = collar_based.best_fscore(
         scores=leaderboard['auc2'][2],
         ground_truth=validation_ground_truth_filepath,
-        filepath=storage_dir / f'sed_score_transform_psds2.tsv',
+        **collar_based_params, num_jobs=8
     )
-    for crnn_dir in weak_label_crnn_dirs:
+    for event_class in thresholds:
+        leaderboard['auc2'][1][event_class]['threshold'] = thresholds[event_class]
+    dump_json(leaderboard['auc2'][1], storage_dir / 'sed_hyper_params_psds2.json')
+    for crnn_dir in strong_label_crnn_dirs:
         tuning_dir = Path(crnn_dir) / 'hyper_params'
         os.makedirs(str(tuning_dir), exist_ok=True)
         (tuning_dir / storage_dir.name).symlink_to(storage_dir)

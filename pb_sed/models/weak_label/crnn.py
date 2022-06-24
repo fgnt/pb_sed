@@ -37,28 +37,35 @@ class CRNN(base.SoundEventModel):
     """
     def __init__(
             self, feature_extractor, cnn, rnn_fwd, rnn_bwd, *,
-            labelwise_metrics=(), label_mapping=None,
+            minimum_score=1e-5, label_smoothing=0.,
+            labelwise_metrics=(), label_mapping=None, test_labels=None,
             slat=False, strong_fwd_bwd_loss_weight=1., class_weights=None,
     ):
         super().__init__(
             labelwise_metrics=labelwise_metrics,
-            label_mapping=label_mapping
+            label_mapping=label_mapping,
+            test_labels=test_labels,
         )
         self.feature_extractor = feature_extractor
         self.cnn = cnn
         self.rnn_fwd = rnn_fwd
         self.rnn_bwd = rnn_bwd
+        self.minimum_score = minimum_score
+        self.label_smoothing = label_smoothing
         self.slat = slat
         self.strong_fwd_bwd_loss_weight = strong_fwd_bwd_loss_weight
         self.class_weights = None if class_weights is None else torch.Tensor(class_weights)
 
+    def sigmoid(self, y):
+        return self.minimum_score + (1-2*self.minimum_score) * nn.Sigmoid()(y)
+
     def fwd_tagging(self, h, seq_len):
         y, seq_len_y = self.rnn_fwd(h, seq_len=seq_len)
-        return nn.Sigmoid()(y), seq_len_y
+        return self.sigmoid(y), seq_len_y
 
     def bwd_tagging(self, h, seq_len):
         y, seq_len_y = self.rnn_bwd(h, seq_len=seq_len)
-        return nn.Sigmoid()(y), seq_len_y
+        return self.sigmoid(y), seq_len_y
 
     def forward(self, inputs):
         """
@@ -166,6 +173,9 @@ class CRNN(base.SoundEventModel):
         return review
 
     def compute_weak_fwd_bwd_loss(self, y_fwd, y_bwd, targets, seq_len):
+        if self.label_smoothing > 0.:
+            targets = torch.clip(
+                targets, min=self.label_smoothing, max=1-self.label_smoothing)
         if y_bwd is None:
             y_weak = TakeLast(axis=2)(y_fwd, seq_len=seq_len)
             # y_weak = y_weak + 0.1 * (weak_targets - y_weak)
@@ -177,6 +187,9 @@ class CRNN(base.SoundEventModel):
             return nn.BCELoss(reduction='none')(y_weak, targets)
 
     def compute_strong_fwd_bwd_loss(self, y_fwd, y_bwd, targets):
+        if self.label_smoothing > 0.:
+            targets = torch.clip(
+                targets, min=self.label_smoothing, max=1-self.label_smoothing)
         strong_targets_fwd = torch.cummax(targets, dim=-1)[0]
         strong_targets_bwd = torch.cummax(targets.flip(-1), dim=-1)[0].flip(-1)
         loss = nn.BCELoss(reduction='none')(y_fwd, strong_targets_fwd)
@@ -404,4 +417,5 @@ def tune_sound_event_detection(
         print()
         print(metric_name, ':')
         print(leaderboard[metric_name][0])
+
     return leaderboard

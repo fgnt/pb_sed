@@ -74,7 +74,7 @@ class CRNN(base.SoundEventModel):
             targets = None
 
         tag_condition = inputs["tag_condition"].unsqueeze(-1) if self.tag_conditioning else None
-        h, seq_len_h = self.cnn(x, seq_len_x, tag_condition)
+        h, seq_len_h = self.cnn(x, seq_len_x, tag_condition if self.cnn.conditional_dims else None)
         if self.tag_conditioning:
             b, f, t = h.shape
             tag_condition = torch.broadcast_to(tag_condition, (b, tag_condition.shape[1], t))
@@ -163,7 +163,7 @@ class CRNN(base.SoundEventModel):
         )
         if config['tag_conditioning']:
             config['cnn']['conditional_dims'] = num_events
-            in_channels += num_events
+            in_channels += config['cnn']['conditional_dims']
         config['cnn']['cnn_2d']['in_channels'] = in_channels
         config['cnn']['input_height'] = input_size
         input_size = config['cnn']['cnn_1d']['out_channels'][-1]

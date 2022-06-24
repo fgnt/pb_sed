@@ -110,6 +110,7 @@ def inference(
 
     scores = {}
     with torch.no_grad():
+        score_cache = {}
         for batch in tqdm(dataset):
             if 'weak_targets' in batch:
                 batch.pop('weak_targets')
@@ -125,7 +126,6 @@ def inference(
                 )
             else:
                 input_segments = [batch]
-            batch_scores = {}
             for segment in input_segments:
                 segment = model[0].example_to_device(segment, device)
                 segment_scores = []
@@ -160,7 +160,7 @@ def inference(
                     def post_processing_fn(x):
                         return x
 
-                batch_scores.update({
+                score_cache.update({
                     audio_id: post_processing_fn(
                         segment_scores[i, ..., :sl].swapaxes(-2, -1)
                     )
@@ -171,7 +171,7 @@ def inference(
                 # applying mask allows to, e.g, mask SED score by tags.
                 if apply_mask.any():
                     assert masks is not None
-                    for audio_id in batch_scores:
+                    for audio_id in score_cache:
                         assert audio_id in masks, audio_id
                         if apply_mask.ndim == 2:
                             apply_mask = apply_mask[..., None, :]
@@ -181,36 +181,44 @@ def inference(
                         #         f'but shape {apply_mask.shape} was given.'
                         #     )
                         mask = np.maximum(masks[audio_id], 1 - apply_mask)
-                        batch_scores[audio_id] *= mask
+                        score_cache[audio_id] *= mask
             if merge_score_segments:
-                batch_scores = merge_segments(
-                    batch_scores,
-                    segment_overlap=segment_overlap
-                    if score_segment_overlap is None else score_segment_overlap
-                )
+                if '_!segment!_' in segment['example_id'][0]:
+                    seg_idx, n_segments = segment['example_id'][0].split('_!segment!_')[-1].split('_')
+                    seg_idx = int(seg_idx)
+                    n_segments = int(n_segments)
+                    if seg_idx == n_segments - 1:
+                        score_cache = merge_segments(
+                            score_cache,
+                            segment_overlap=segment_overlap
+                            if score_segment_overlap is None else score_segment_overlap
+                        )
+                    else:
+                        continue
             if (
                 timestamps is not None or event_classes is not None
                 or score_storage_dir is not None
             ):
                 assert timestamps is not None
                 assert event_classes is not None
-                batch_scores = scores_to_dataframes(
-                    batch_scores, timestamps, event_classes, score_storage_dir,
+                score_cache = scores_to_dataframes(
+                    score_cache, timestamps, event_classes, score_storage_dir,
                 )
             if score_storage_dir is None:
                 if not scores:
-                    scores = batch_scores
+                    scores = score_cache
                 elif isinstance(scores, (list, tuple)):
-                    assert isinstance(batch_scores, (list, tuple))
-                    assert len(batch_scores) == len(scores)
+                    assert isinstance(score_cache, (list, tuple))
+                    assert len(score_cache) == len(scores)
                     for i in range(len(scores)):
-                        scores[i].update(batch_scores[i])
+                        scores[i].update(score_cache[i])
                 else:
                     assert isinstance(scores, dict)
-                    assert isinstance(batch_scores, dict)
-                    scores.update(batch_scores)
+                    assert isinstance(score_cache, dict)
+                    scores.update(score_cache)
             else:
-                scores = batch_scores
+                scores = score_cache
+            score_cache = {}
     return scores
 
 

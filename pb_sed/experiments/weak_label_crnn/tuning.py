@@ -5,15 +5,16 @@ from functools import partial
 from sacred import Experiment as Exp
 from sacred.observers import FileStorageObserver
 from sacred.commands import print_config
+from codecarbon import EmissionsTracker
 
 from paderbox.utils.timer import timeStamped
 from paderbox.io.json_module import load_json, dump_json
-from sed_scores_eval import io
+from sed_scores_eval import collar_based
 
 from pb_sed.paths import storage_root
 from pb_sed.models import weak_label
 from pb_sed.models import base
-from pb_sed.database.desed.provider import DESEDProvider
+from pb_sed.data_preparation.provider import DataProvider
 from pb_sed.experiments.weak_label_crnn.inference import ex as evaluation
 
 
@@ -25,8 +26,6 @@ ex = Exp(ex_name)
 def config():
     debug = False
     timestamp = timeStamped('')[1:] + ('_debug' if debug else '')
-    storage_dir = str(storage_root / ex_name / timestamp)
-    assert not Path(storage_dir).exists()
 
     group_dir = ''
     if isinstance(group_dir, list):
@@ -39,8 +38,12 @@ def config():
     crnn_checkpoints = 'ckpt_best_macro_fscore_weak.pth'
     crnn_config = load_json(Path(crnn_dirs[0]) / '1' / 'config.json')
     data_provider = crnn_config['data_provider']
+    database_name = crnn_config.get('database_name', 'desed')
+    storage_dir = str(storage_root / 'weak_label_crnn' / database_name / 'hyper_params' / timestamp)
+    assert not Path(storage_dir).exists()
     del crnn_config
     data_provider['min_audio_length'] = .01
+    data_provider['cached_datasets'] = None
 
     device = 0
 
@@ -51,10 +54,12 @@ def config():
 
     boundaries_filter_lengths = [20] if debug else [100, 80, 60, 50, 40, 30, 20, 10, 0]
 
-    detection_window_lengths_scenario_1 = [21] if debug else [51, 41, 31, 21, 11]
+    tune_detection_scenario_1 = True
+    detection_window_lengths_scenario_1 = [11] if debug else [51, 41, 31, 21, 11]
     detection_window_shift_scenario_1 = 1
-    detection_medfilt_lengths_scenario_1 = [21] if debug else [101, 81, 61, 51, 41, 31, 21, 11]
+    detection_medfilt_lengths_scenario_1 = [11] if debug else [101, 81, 61, 51, 41, 31, 21, 11]
 
+    tune_detection_scenario_2 = True
     detection_window_lengths_scenario_2 = [250]
     detection_window_shift_scenario_2 = 250
     detection_medfilt_lengths_scenario_2 = [1]
@@ -70,9 +75,11 @@ def main(
         validation_set_name, validation_ground_truth_filepath,
         eval_set_name, eval_ground_truth_filepath,
         boundaries_filter_lengths,
+        tune_detection_scenario_1,
         detection_window_lengths_scenario_1,
         detection_window_shift_scenario_1,
         detection_medfilt_lengths_scenario_1,
+        tune_detection_scenario_2,
         detection_window_lengths_scenario_2,
         detection_window_shift_scenario_2,
         detection_medfilt_lengths_scenario_2,
@@ -83,6 +90,9 @@ def main(
     print()
     print_config(_run)
     print(storage_dir)
+    emissions_tracker = EmissionsTracker(
+        output_dir=storage_dir, on_csv_write="update", log_level='error')
+    emissions_tracker.start()
     storage_dir = Path(storage_dir)
 
     boundaries_collar_based_params = {
@@ -121,7 +131,7 @@ def main(
         )
         for crnn_dir, crnn_checkpoint in zip(crnn_dirs, crnn_checkpoints)
     ]
-    data_provider = DESEDProvider.from_config(data_provider)
+    data_provider = DataProvider.from_config(data_provider)
     data_provider.test_transform.label_encoder.initialize_labels()
     event_classes = data_provider.test_transform.label_encoder.inverse_label_mapping
     event_classes = [event_classes[i] for i in range(len(event_classes))]
@@ -153,11 +163,6 @@ def main(
         crnns, dataset, device, timestamps, event_classes, metrics,
         storage_dir=storage_dir
     )
-    io.write_score_transform(
-        scores=leaderboard['f'][2],
-        ground_truth=validation_ground_truth_filepath,
-        filepath=storage_dir / f'tagging_score_transform.tsv',
-    )
     _, hyper_params, tagging_scores = leaderboard['f']
     tagging_thresholds = np.array([
         hyper_params[event_class]['threshold'] for event_class in event_classes
@@ -182,70 +187,83 @@ def main(
         storage_dir=storage_dir
     )
 
-    metrics = {
-        'f': partial(
-            base.f_collar, ground_truth=validation_ground_truth_filepath,
-            return_onset_offset_bias=True, num_jobs=8, **collar_based_params,
-        ),
-        'auc': partial(
-            base.psd_auc, ground_truth=validation_ground_truth_filepath,
-            audio_durations=audio_durations, num_jobs=8,
-            **psds_scenario_1,
-        ),
-    }
-    leaderboard = weak_label.crnn.tune_sound_event_detection(
-        crnns, dataset, device, timestamps, event_classes, tags, metrics,
-        tag_masking={'f': True, 'auc': '?'},
-        window_lengths=detection_window_lengths_scenario_1,
-        window_shift=detection_window_shift_scenario_1,
-        medfilt_lengths=detection_medfilt_lengths_scenario_1,
-    )
-    dump_json(leaderboard['f'][1], storage_dir / f'sed_hyper_params_f.json')
-    io.write_score_transform(
-        scores=leaderboard['f'][2],
-        ground_truth=validation_ground_truth_filepath,
-        filepath=storage_dir / f'sed_score_transform_f.tsv',
-    )
-    dump_json(leaderboard['auc'][1], storage_dir / 'sed_hyper_params_psds1.json')
-    io.write_score_transform(
-        scores=leaderboard['auc'][2],
-        ground_truth=validation_ground_truth_filepath,
-        filepath=storage_dir / f'sed_score_transform_psds1.tsv',
-    )
-
-    metrics = {
-        'auc': partial(
-            base.psd_auc, ground_truth=validation_ground_truth_filepath,
-            audio_durations=audio_durations, num_jobs=8,
-            **psds_scenario_2,
+    if tune_detection_scenario_1:
+        metrics = {
+            'f': partial(
+                base.f_collar, ground_truth=validation_ground_truth_filepath,
+                return_onset_offset_bias=True, num_jobs=8, **collar_based_params,
+            ),
+            'auc': partial(
+                base.psd_auc, ground_truth=validation_ground_truth_filepath,
+                audio_durations=audio_durations, num_jobs=8,
+                **psds_scenario_1,
+            ),
+        }
+        leaderboard = weak_label.crnn.tune_sound_event_detection(
+            crnns, dataset, device, timestamps, event_classes, tags, metrics,
+            tag_masking={'f': True, 'auc': '?'},
+            window_lengths=detection_window_lengths_scenario_1,
+            window_shift=detection_window_shift_scenario_1,
+            medfilt_lengths=detection_medfilt_lengths_scenario_1,
         )
-    }
-    leaderboard = weak_label.crnn.tune_sound_event_detection(
-        crnns, dataset, device, timestamps, event_classes, tags, metrics,
-        tag_masking=False,
-        window_lengths=detection_window_lengths_scenario_2,
-        window_shift=detection_window_shift_scenario_2,
-        medfilt_lengths=detection_medfilt_lengths_scenario_2,
-    )
-    dump_json(
-        leaderboard['auc'][1], storage_dir / 'sed_hyper_params_psds2.json')
-    io.write_score_transform(
-        scores=leaderboard['auc'][2],
-        ground_truth=validation_ground_truth_filepath,
-        filepath=storage_dir / f'sed_score_transform_psds2.tsv',
-    )
+        dump_json(leaderboard['f'][1], storage_dir / f'sed_hyper_params_f.json')
+        f, p, r, thresholds, _ = collar_based.best_fscore(
+            scores=leaderboard['auc'][2],
+            ground_truth=validation_ground_truth_filepath,
+            **collar_based_params, num_jobs=8
+        )
+        for event_class in thresholds:
+            leaderboard['auc'][1][event_class]['threshold'] = thresholds[event_class]
+        dump_json(
+            leaderboard['auc'][1], storage_dir / 'sed_hyper_params_psds1.json')
+    if tune_detection_scenario_2:
+        metrics = {
+            'auc': partial(
+                base.psd_auc, ground_truth=validation_ground_truth_filepath,
+                audio_durations=audio_durations, num_jobs=8,
+                **psds_scenario_2,
+            )
+        }
+        leaderboard = weak_label.crnn.tune_sound_event_detection(
+            crnns, dataset, device, timestamps, event_classes, tags, metrics,
+            tag_masking=False,
+            window_lengths=detection_window_lengths_scenario_2,
+            window_shift=detection_window_shift_scenario_2,
+            medfilt_lengths=detection_medfilt_lengths_scenario_2,
+        )
+        f, p, r, thresholds, _ = collar_based.best_fscore(
+            scores=leaderboard['auc'][2],
+            ground_truth=validation_ground_truth_filepath,
+            **collar_based_params, num_jobs=8
+        )
+        for event_class in thresholds:
+            leaderboard['auc'][1][event_class]['threshold'] = thresholds[event_class]
+        dump_json(
+            leaderboard['auc'][1], storage_dir / 'sed_hyper_params_psds2.json')
     for crnn_dir in crnn_dirs:
         tuning_dir = Path(crnn_dir) / 'hyper_params'
         os.makedirs(str(tuning_dir), exist_ok=True)
         (tuning_dir / storage_dir.name).symlink_to(storage_dir)
+    emissions_tracker.stop()
     print(storage_dir)
 
     if eval_set_name:
-        evaluation.run(
-            config_updates={
-                'debug': debug,
-                'hyper_params_dir': str(storage_dir),
-                'dataset_name': eval_set_name,
-                'ground_truth_filepath': eval_ground_truth_filepath,
-            },
-        )
+        if tune_detection_scenario_1:
+            evaluation.run(
+                config_updates={
+                    'debug': debug,
+                    'hyper_params_dir': str(storage_dir),
+                    'dataset_name': eval_set_name,
+                    'ground_truth_filepath': eval_ground_truth_filepath,
+                },
+            )
+        if tune_detection_scenario_2:
+            evaluation.run(
+                config_updates={
+                    'debug': debug,
+                    'hyper_params_dir': str(storage_dir),
+                    'dataset_name': eval_set_name,
+                    'ground_truth_filepath': eval_ground_truth_filepath,
+                    'sed_hyper_params_name': 'psds2',
+                },
+            )

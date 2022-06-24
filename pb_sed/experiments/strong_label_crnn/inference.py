@@ -6,6 +6,7 @@ from functools import partial
 from sacred import Experiment as Exp
 from sacred.observers import FileStorageObserver
 from sacred.commands import print_config
+from codecarbon import EmissionsTracker
 
 from paderbox.utils.timer import timeStamped
 from paderbox.io.json_module import load_json, dump_json
@@ -30,8 +31,6 @@ ex = Exp(ex_name)
 def config():
     debug = False
     timestamp = timeStamped('')[1:] + ('_debug' if debug else '')
-    storage_dir = str(storage_root / ex_name / timestamp)
-    assert not Path(storage_dir).exists()
 
     strong_label_crnn_hyper_params_dir = ''
     assert len(strong_label_crnn_hyper_params_dir) > 0, 'Set strong_label_crnn_hyper_params_dir on the command line.'
@@ -40,6 +39,9 @@ def config():
     assert len(strong_label_crnn_dirs) > 0, 'strong_label_crnn_dirs must not be empty.'
     strong_label_crnn_checkpoints = strong_label_crnn_tuning_config['strong_label_crnn_checkpoints']
     data_provider = strong_label_crnn_tuning_config['data_provider']
+    database_name = strong_label_crnn_tuning_config['database_name']
+    storage_dir = str(storage_root / 'strong_label_crnn' / database_name / 'inference' / timestamp)
+    assert not Path(storage_dir).exists()
 
     weak_label_crnn_hyper_params_dir = strong_label_crnn_tuning_config['weak_label_crnn_hyper_params_dir']
     assert len(weak_label_crnn_hyper_params_dir) > 0, 'Set weak_label_crnn_hyper_params_dir on the command line.'
@@ -136,7 +138,6 @@ def sound_event_detection(
             io.write_detections_for_multiple_thresholds(
                 detection_scores[i], thresholds=np.linspace(.01, .99, 50),
                 dir_path=detection_storage_dir[i],
-                # score_transform=Path(hyper_params_dir) / f'sed_score_transform_{name}.tsv',
             )
         if 'threshold' in hyper_params[i][event_classes[0]]:
             thresholds = {
@@ -150,7 +151,7 @@ def sound_event_detection(
             if detection_storage_dir and detection_storage_dir[i]:
                 io.write_detection(
                     detection_scores[i], thresholds,
-                    Path(detection_storage_dir[i]) / '0.500.tsv',
+                    Path(detection_storage_dir[i]) / 'cbf.tsv',
                 )
             if ground_truth and collar_based_params:
                 f, p, r, stats = collar_based.fscore(
@@ -176,8 +177,8 @@ def sound_event_detection(
             for clip_id in event_detections[-1]:
                 events_in_clip = []
                 for onset, offset, event_label in event_detections[-1][clip_id]:
-                    onset = max(onset - pseudo_widening - hyper_params[i][event_label]['onset_bias'], 0)
-                    offset = offset + pseudo_widening - hyper_params[i][event_label]['offset_bias']
+                    onset = max(onset - pseudo_widening - hyper_params[i][event_label].get('onset_bias', 0), 0)
+                    offset = offset + pseudo_widening - hyper_params[i][event_label].get('offset_bias', 0)
                     if offset > onset:
                         events_in_clip.append((onset, offset, event_label))
                 event_detections[-1][clip_id] = events_in_clip
@@ -205,7 +206,6 @@ def sound_event_detection(
                 psds, psd_roc, classwise_rocs = intersection_based.reference.approximate_psds(
                     detection_scores[i], ground_truth, audio_durations,
                     **psds_params[j], thresholds=np.linspace(.01, .99, 50),
-                    score_transform=Path(hyper_params_dir) / f'sed_score_transform_{name}.tsv',
                 )
                 print(f'approx_psds[{j}]', psds)
                 results[-1][f'approx_psds[{j}]'] = psds
@@ -236,6 +236,9 @@ def main(
     print()
     print_config(_run)
     print(storage_dir)
+    emissions_tracker = EmissionsTracker(
+        output_dir=storage_dir, on_csv_write="update", log_level='error')
+    emissions_tracker.start()
     storage_dir = Path(storage_dir)
 
     collar_based_params = {
@@ -268,6 +271,8 @@ def main(
         )
         for crnn_dir, crnn_checkpoint in zip(weak_label_crnn_dirs, weak_label_crnn_checkpoints)
     ]
+    print('Weak Label CRNN Params', sum([p.numel() for crnn in weak_label_crnns for p in crnn.parameters()]))
+    print('Weak Label CNN2d Params', sum([p.numel() for crnn in weak_label_crnns for p in crnn.cnn.cnn_2d.parameters()]))
     if not isinstance(strong_label_crnn_checkpoints, list):
         assert isinstance(strong_label_crnn_checkpoints, str), strong_label_crnn_checkpoints
         strong_label_crnn_checkpoints = len(strong_label_crnn_dirs) * [strong_label_crnn_checkpoints]
@@ -278,6 +283,8 @@ def main(
         )
         for crnn_dir, crnn_checkpoint in zip(strong_label_crnn_dirs, strong_label_crnn_checkpoints)
     ]
+    print('Strong Label CRNN Params', sum([p.numel() for crnn in strong_label_crnns for p in crnn.parameters()]))
+    print('Strong Label CNN2d Params', sum([p.numel() for crnn in strong_label_crnns for p in crnn.cnn.cnn_2d.parameters()]))
     data_provider = DESEDProvider.from_config(data_provider)
     data_provider.test_transform.label_encoder.initialize_labels()
     event_classes = data_provider.test_transform.label_encoder.inverse_label_mapping
@@ -341,8 +348,8 @@ def main(
                 segment_batch,
                 max_length=max_segment_length,
                 overlap=segment_overlap
-            ))
-        tags, _ = tagging(
+            )).unbatch()
+        tags, tagging_scores, _ = tagging(
             weak_label_crnns, dataset, device, timestamps, event_classes,
             weak_label_crnn_hyper_params_dir, None, None,
         )
@@ -354,7 +361,7 @@ def main(
 
         dataset = dataset.map(add_tag_condition)
 
-        timestamps = np.arange(0, 10000) * frame_shift
+        timestamps = np.round(np.arange(0, 100000) * frame_shift, decimals=6)
         if not isinstance(sed_hyper_params_name, (list, tuple)):
             sed_hyper_params_name = [sed_hyper_params_name]
         events, sed_results = sound_event_detection(
@@ -402,4 +409,5 @@ def main(
     inference_dir = Path(strong_label_crnn_hyper_params_dir) / 'inference'
     os.makedirs(str(inference_dir), exist_ok=True)
     (inference_dir / storage_dir.name).symlink_to(storage_dir)
+    emissions_tracker.stop()
     print(storage_dir)

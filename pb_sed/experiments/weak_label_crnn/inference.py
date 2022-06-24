@@ -5,6 +5,7 @@ from copy import deepcopy
 from sacred import Experiment as Exp
 from sacred.observers import FileStorageObserver
 from sacred.commands import print_config
+from codecarbon import EmissionsTracker
 
 from paderbox.utils.timer import timeStamped
 from paderbox.io.json_module import load_json, dump_json
@@ -16,7 +17,7 @@ from sed_scores_eval import io
 from pb_sed.paths import storage_root
 from pb_sed.models.weak_label import CRNN
 from pb_sed.models import base
-from pb_sed.database.desed.provider import DESEDProvider
+from pb_sed.data_preparation.provider import DataProvider
 from pb_sed.utils.segment import merge_segments
 
 ex_name = 'weak_label_crnn_inference'
@@ -27,8 +28,6 @@ ex = Exp(ex_name)
 def config():
     debug = False
     timestamp = timeStamped('')[1:] + ('_debug' if debug else '')
-    storage_dir = str(storage_root / ex_name / timestamp)
-    assert not Path(storage_dir).exists()
 
     hyper_params_dir = ''
     assert len(hyper_params_dir) > 0, 'Set hyper_params_dir on the command line.'
@@ -38,6 +37,9 @@ def config():
     assert len(crnn_dirs) > 0, 'crnn_dirs must not be empty.'
     crnn_checkpoints = tuning_config['crnn_checkpoints']
     data_provider = tuning_config['data_provider']
+    database_name = tuning_config['database_name']
+    storage_dir = str(storage_root / 'weak_label_crnn' / database_name / 'inference' / timestamp)
+    assert not Path(storage_dir).exists()
     del tuning_config
     sed_hyper_params_name = ['f', 'psds1']
 
@@ -54,7 +56,7 @@ def config():
     weak_pseudo_labeling = False
     boundary_pseudo_labeling = False
     strong_pseudo_labeling = False
-    pseudo_labelled_dataset_name = dataset_name
+    pseudo_labeled_dataset_name = dataset_name
 
     pseudo_widening = .0
 
@@ -113,7 +115,6 @@ def tagging(
                 psds, psd_roc, classwise_rocs = intersection_based.reference.approximate_psds(
                     tagging_scores_df, ground_truth, audio_durations,
                     **psds_params[j], thresholds=np.linspace(.01, .99, 50),
-                    score_transform=Path(hyper_params_dir) / f'tagging_score_transform.tsv',
                 )
                 print(f'approx_psds[{j}]', psds)
                 results[f'approx_psds[{j}]'] = psds
@@ -123,11 +124,15 @@ def tagging(
 
     thresholds = np.array([
         thresholds[event_class] for event_class in event_classes])
-    tags = {
-        audio_id: tagging_scores[audio_id][0] > thresholds
+    tagging_scores = {
+        audio_id: tagging_scores[audio_id][0]
         for audio_id in tagging_scores.keys()
     }
-    return tags, results
+    tags = {
+        audio_id: tagging_scores[audio_id] > thresholds
+        for audio_id in tagging_scores.keys()
+    }
+    return tags, tagging_scores, results
 
 
 def boundaries_detection(
@@ -267,7 +272,6 @@ def sound_event_detection(
             io.write_detections_for_multiple_thresholds(
                 detection_scores[i], thresholds=np.linspace(.01, .99, 50),
                 dir_path=detection_storage_dir[i],
-                score_transform=Path(hyper_params_dir) / f'sed_score_transform_{name}.tsv',
             )
         if 'threshold' in hyper_params[i][event_classes[0]]:
             thresholds = {
@@ -282,7 +286,7 @@ def sound_event_detection(
             if detection_storage_dir and detection_storage_dir[i]:
                 io.write_detection(
                     detection_scores[i], thresholds,
-                    Path(detection_storage_dir[i]) / '0.500.tsv',
+                    Path(detection_storage_dir[i]) / 'cbf.tsv',
                 )
             if ground_truth and collar_based_params:
                 f, p, r, stats = collar_based.fscore(
@@ -308,8 +312,8 @@ def sound_event_detection(
             for clip_id in event_detections[-1]:
                 events_in_clip = []
                 for onset, offset, event_label in event_detections[-1][clip_id]:
-                    onset = max(onset - pseudo_widening - hyper_params[i][event_label]['onset_bias'], 0)
-                    offset = offset + pseudo_widening - hyper_params[i][event_label]['offset_bias']
+                    onset = max(onset - pseudo_widening - hyper_params[i][event_label].get('onset_bias', 0), 0)
+                    offset = offset + pseudo_widening - hyper_params[i][event_label].get('offset_bias', 0)
                     if offset > onset:
                         events_in_clip.append((onset, offset, event_label))
                 event_detections[-1][clip_id] = events_in_clip
@@ -337,7 +341,6 @@ def sound_event_detection(
                 psds, psd_roc, classwise_rocs = intersection_based.reference.approximate_psds(
                     detection_scores[i], ground_truth, audio_durations,
                     **psds_params[j], thresholds=np.linspace(.01, .99, 50),
-                    score_transform=Path(hyper_params_dir) / f'sed_score_transform_{name}.tsv',
                 )
                 print(f'approx_psds[{j}]', psds)
                 results[-1][f'approx_psds[{j}]'] = psds
@@ -361,13 +364,16 @@ def main(
         data_provider, dataset_name, ground_truth_filepath,
         save_scores, save_detections, max_segment_length, segment_overlap,
         weak_pseudo_labeling, boundary_pseudo_labeling, strong_pseudo_labeling,
-        pseudo_widening, pseudo_labelled_dataset_name,
+        pseudo_widening, pseudo_labeled_dataset_name,
 ):
     print()
     print('##### Inference #####')
     print()
     print_config(_run)
     print(storage_dir)
+    emissions_tracker = EmissionsTracker(
+        output_dir=storage_dir, on_csv_write="update", log_level='error')
+    emissions_tracker.start()
     storage_dir = Path(storage_dir)
 
     boundary_collar_based_params = {
@@ -405,7 +411,9 @@ def main(
         )
         for crnn_dir, crnn_checkpoint in zip(crnn_dirs, crnn_checkpoints)
     ]
-    data_provider = DESEDProvider.from_config(data_provider)
+    print('Params', sum([p.numel() for crnn in crnns for p in crnn.parameters()]))
+    print('CNN2d Params', sum([p.numel() for crnn in crnns for p in crnn.cnn.cnn_2d.parameters()]))
+    data_provider = DataProvider.from_config(data_provider)
     data_provider.test_transform.label_encoder.initialize_labels()
     event_classes = data_provider.test_transform.label_encoder.inverse_label_mapping
     event_classes = [event_classes[i] for i in range(len(event_classes))]
@@ -428,9 +436,9 @@ def main(
     if not isinstance(strong_pseudo_labeling, list):
         strong_pseudo_labeling = len(dataset_name)*[strong_pseudo_labeling]
     assert len(strong_pseudo_labeling) == len(dataset_name)
-    if not isinstance(pseudo_labelled_dataset_name, list):
-        pseudo_labelled_dataset_name = [pseudo_labelled_dataset_name]
-    assert len(pseudo_labelled_dataset_name) == len(dataset_name)
+    if not isinstance(pseudo_labeled_dataset_name, list):
+        pseudo_labeled_dataset_name = [pseudo_labeled_dataset_name]
+    assert len(pseudo_labeled_dataset_name) == len(dataset_name)
 
     database = deepcopy(data_provider.db.data)
     for i in range(len(dataset_name)):
@@ -468,7 +476,7 @@ def main(
                 timestamps[audio_id] = np.concatenate((
                     ts, [audio_durations[audio_id]]
                 ))
-        tags, tagging_results = tagging(
+        tags, tagging_scores, tagging_results = tagging(
             crnns, dataset, device, timestamps, event_classes,
             hyper_params_dir, ground_truth_filepath[i], audio_durations,
             [psds_scenario_1, psds_scenario_2],
@@ -481,7 +489,7 @@ def main(
                 storage_dir / f'tagging_results_{dataset_name[i]}.json'
             )
 
-        timestamps = np.arange(0, 10000) * frame_shift
+        timestamps = np.round(np.arange(0, 100000) * frame_shift, decimals=6)
         if ground_truth_filepath[i] is not None or boundary_pseudo_labeling[i]:
             boundaries, boundaries_detection_results = boundaries_detection(
                 crnns, dataset, device, timestamps, event_classes, tags,
@@ -500,7 +508,7 @@ def main(
             boundaries = {}
         if not isinstance(sed_hyper_params_name, (list, tuple)):
             sed_hyper_params_name = [sed_hyper_params_name]
-        if ground_truth_filepath[i] is not None or strong_pseudo_labeling[i]:
+        if (ground_truth_filepath[i] is not None) or strong_pseudo_labeling[i] or save_scores or save_detections:
             events, sed_results = sound_event_detection(
                 crnns, dataset, device, timestamps, event_classes, tags,
                 hyper_params_dir, sed_hyper_params_name,
@@ -522,7 +530,7 @@ def main(
                     )
         else:
             events = [{}]
-        database['datasets'][pseudo_labelled_dataset_name[i]] = base.pseudo_label(
+        database['datasets'][pseudo_labeled_dataset_name[i]] = base.pseudo_label(
             database['datasets'][dataset_name[i]], event_classes,
             weak_pseudo_labeling[i],
             boundary_pseudo_labeling[i],
@@ -541,4 +549,5 @@ def main(
     inference_dir = Path(hyper_params_dir) / 'inference'
     os.makedirs(str(inference_dir), exist_ok=True)
     (inference_dir / storage_dir.name).symlink_to(storage_dir)
+    emissions_tracker.stop()
     print(storage_dir)

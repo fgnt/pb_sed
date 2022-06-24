@@ -1,5 +1,6 @@
 
 import numpy as np
+import torch
 import time
 from pathlib import Path
 from sacred import Experiment as Exp
@@ -10,6 +11,7 @@ from paderbox.utils.timer import timeStamped
 from paderbox.utils.random_utils import (
     LogTruncatedNormal, TruncatedExponential
 )
+from paderbox.utils.nested import flatten, deflatten
 from paderbox.transform.module_fbank import MelWarping
 from padertorch.train.hooks import LRAnnealingHook
 from padertorch.train.trigger import AllTrigger, EndTrigger, NotTrigger
@@ -34,47 +36,131 @@ def config():
     debug = False
     timestamp = timeStamped('')[1:] + ('_debug' if debug else '')
     group_name = timestamp
-    storage_dir = str(storage_root / ex_name / group_name / timestamp)
+    database_name = 'desed'
+    storage_dir = str(storage_root / 'strong_label_crnn' / database_name / 'training' / group_name / timestamp)
+
+    init_ckpt_path = None
+    frozen_cnn_2d_layers = 0
+    frozen_cnn_1d_layers = 0
 
     # Data provider
-    batch_size = 16
-    data_provider = {
-        'factory': DESEDProvider,
-        'json_path': str(database_jsons_dir / 'desed_pseudo_labeled.json'),
-        'train_set': {
-            'train_weak': 20,
-            'train_synthetic20': 2,
-            'train_synthetic21': 1,
-            'train_unlabel_in_domain': 2,
-        },
-        'cached_datasets': [] if debug else ['train_weak', 'train_synthetic20'],
-        'train_fetcher': {
-            'batch_size': batch_size,
-            'min_dataset_examples_in_batch': {
-                'train_weak': int(6*batch_size/16),
-                'train_synthetic20': int(1*batch_size/16),
-                'train_synthetic21': int(2*batch_size/16),
-                'train_unlabel_in_domain': 0,
+    if database_name == 'desed':
+        external_data = True
+        batch_size = 32
+        data_provider = {
+            'factory': DESEDProvider,
+            'json_path':
+                str(database_jsons_dir / 'desed_pseudo_labeled_with_external.json') if external_data
+                else str(database_jsons_dir / 'desed_pseudo_labeled_without_external.json'),
+            'train_set': {
+                'train_weak': 10 if external_data else 20,
+                'train_strong': 10 if external_data else 0,
+                'train_synthetic20': 2,
+                'train_synthetic21': 1,
+                'train_unlabel_in_domain': 2,
             },
-        },
-        'storage_dir': storage_dir,
-    }
-    num_events = 10
-    DESEDProvider.get_config(data_provider)
+            'cached_datasets': None if debug else ['train_weak', 'train_synthetic20'],
+            'train_fetcher': {
+                'batch_size': batch_size,
+                'prefetch_workers': batch_size,
+                'min_dataset_examples_in_batch': {
+                    'train_weak': int(3*batch_size/32),
+                    'train_strong': int(6*batch_size/32) if external_data else 0,
+                    'train_synthetic20': int(1*batch_size/32),
+                    'train_synthetic21': int(2*batch_size/32),
+                    'train_unlabel_in_domain': 0,
+                },
+            },
+            'storage_dir': storage_dir,
+        }
+        num_events = 10
+        DESEDProvider.get_config(data_provider)
 
-    validation_set_name = 'validation'
-    validation_ground_truth_filepath = None
-    weak_label_crnn_hyper_params_dir = ''
-    eval_set_name = 'eval_public'
-    eval_ground_truth_filepath = None
+        validation_set_name = 'validation'
+        validation_ground_truth_filepath = None
+        weak_label_crnn_hyper_params_dir = ''
+        eval_set_name = 'eval_public'
+        eval_ground_truth_filepath = None
 
-    num_iterations = 30000 + 15000*(data_provider['train_set']['train_unlabel_in_domain'] > 0)
-    lr_decay_step = 20000 + 10000*(data_provider['train_set']['train_unlabel_in_domain'] > 0)
-    lr_decay_factor = 1/5
-    lr_rampup_steps = 1000
+        num_iterations = 45000 if init_ckpt_path is None else 20000
+        checkpoint_interval = 1000
+        summary_interval = 100
+        back_off_patience = None
+        lr_decay_step = 30000 if back_off_patience is None else None
+        lr_decay_factor = 1/5
+        lr_rampup_steps = 1000 if init_ckpt_path is None else None
+        gradient_clipping = 1e10 if init_ckpt_path is None else 1
+    else:
+        raise ValueError(f'Unknown database {database_name}.')
 
     # Trainer configuration
-    k = 1
+    net_config = 'shallow'
+    if net_config == 'shallow':
+        m = 1
+        cnn = {
+            'cnn_2d': {
+                'out_channels': [
+                    16*m, 16*m, 32*m, 32*m, 64*m, 64*m, 128*m, 128*m, min(256*m, 512),
+                ],
+                'pool_size': 4*[1, (2, 1)] + [1],
+                'kernel_size': 3,
+                'norm': 'batch',
+                'norm_kwargs': {'eps': 1e-3},
+                'activation_fn': 'relu',
+                'dropout': .0,
+                'output_layer': False,
+            },
+            'cnn_1d': {
+                'out_channels': 3*[256*m],
+                'kernel_size': 3,
+                'norm': 'batch',
+                'norm_kwargs': {'eps': 1e-3},
+                'activation_fn': 'relu',
+                'dropout': .0,
+                'output_layer': False,
+            },
+        }
+    elif net_config == 'deep':
+        m = 2
+        cnn = {
+            'cnn_2d': {
+                'out_channels': (
+                    4*[16*m] + 4*[32*m] + 4*[64*m] + 4*[128*m] + [256*m, min(256*m, 512)]
+                ),
+                'pool_size': 4*[1, 1, 1, (2, 1)] + [1, 1],
+                'kernel_size': 9*[3, 1],
+                'residual_connections': [
+                    None, None, 4, None,
+                    6, None, 8, None,
+                    10, None, 12, None,
+                    14, None, 16, None,
+                    None, None
+                ],
+                'norm': 'batch',
+                'norm_kwargs': {'eps': 1e-3},
+                'activation_fn': 'relu',
+                'pre_activation': True,
+                'dropout': .0,
+                'output_layer': False,
+            },
+            'cnn_1d': {
+                'out_channels': 8*[256*m],
+                'kernel_size': [1] + 3*[3, 1] + [1],
+                'residual_connections': [None, 3, None, 5, None, 7, None, None],
+                'norm': 'batch',
+                'norm_kwargs': {'eps': 1e-3},
+                'activation_fn': 'relu',
+                'pre_activation': True,
+                'dropout': .0,
+                'output_layer': False,
+            },
+        }
+    else:
+        raise ValueError(f'Unknown net_config {net_config}')
+
+    if init_ckpt_path is not None:
+        cnn['conditional_dims'] = 0
+
     trainer = {
         'model': {
             'factory': strong_label.CRNN,
@@ -106,33 +192,14 @@ def config():
                 'max_masked_frequency_rate': .2,
                 'max_noise_scale': .2,
             },
-            'cnn': {
-                'cnn_2d': {
-                    'out_channels':
-                        [16, 16, 32*k, 32*k, 64*k, 64*k, 128*k, 128*k, 256*k],
-                    'pool_size': [1, (2, 1), 1, (2, 1), 1, (2, 1), 1, (2, 1), 1],
-                    'kernel_size': 3,
-                    'norm': 'batch',
-                    'activation_fn': 'relu',
-                    'dropout': .0,
-                    'output_layer': False,
-                },
-                'cnn_1d': {
-                    'out_channels': 3*[256*k],
-                    'kernel_size': 3,
-                    'norm': 'batch',
-                    'activation_fn': 'relu',
-                    'dropout': .0,
-                    'output_layer': False,
-                },
-            },
+            'cnn': cnn,
             'rnn': {
-                'hidden_size': 256*k,
+                'hidden_size': 256*m,
                 'num_layers': 2,
                 'dropout': .0,
                 'output_net': {
                     'out_channels': [
-                        256*k,
+                        256*m,
                         num_events
                     ],
                     'kernel_size': 1,
@@ -146,14 +213,15 @@ def config():
         'optimizer': {
             'factory': Adam,
             'lr': 5e-4,
-            # 'gradient_clipping': .7,
+            'gradient_clipping': gradient_clipping,
             # 'weight_decay': 1e-6,
         },
-        'summary_trigger': (100, 'iteration'),
-        'checkpoint_trigger': (1000, 'iteration'),
+        'summary_trigger': (summary_interval, 'iteration'),
+        'checkpoint_trigger': (checkpoint_interval, 'iteration'),
         'stop_trigger': (num_iterations, 'iteration'),
         'storage_dir': storage_dir,
     }
+    del cnn
     use_transformer = False
     if use_transformer:
         trainer['model']['rnn']['factory'] = TransformerStack
@@ -161,10 +229,9 @@ def config():
         trainer['model']['rnn']['num_heads'] = 10
         trainer['model']['rnn']['num_layers'] = 3
         trainer['model']['rnn']['dropout'] = 0.1
-
     Trainer.get_config(trainer)
-    resume = False
 
+    resume = False
     assert resume or not Path(trainer['storage_dir']).exists()
     ex.observers.append(FileStorageObserver.create(trainer['storage_dir']))
 
@@ -173,7 +240,8 @@ def config():
 def train(
         _run, debug,
         data_provider, trainer,
-        lr_rampup_steps, lr_decay_step, lr_decay_factor,
+        lr_rampup_steps, back_off_patience, lr_decay_step, lr_decay_factor,
+        init_ckpt_path, frozen_cnn_2d_layers, frozen_cnn_1d_layers,
         resume, delay,
         validation_set_name, validation_ground_truth_filepath,
         weak_label_crnn_hyper_params_dir,
@@ -183,6 +251,7 @@ def train(
     print('##### Training #####')
     print()
     print_config(_run)
+    assert (back_off_patience is None) or (lr_decay_step is None), (back_off_patience, lr_decay_step)
     if delay > 0:
         print(f'Sleep for {delay} seconds.')
         time.sleep(delay)
@@ -194,7 +263,22 @@ def train(
     )
     data_provider.test_transform.label_encoder.initialize_labels()
     trainer = Trainer.from_config(trainer)
+    trainer.model.label_mapping = []
+    for idx, label in sorted(data_provider.train_transform.label_encoder.inverse_label_mapping.items()):
+        assert idx == len(trainer.model.label_mapping), (idx, label, len(trainer.model.label_mapping))
+        trainer.model.label_mapping.append(label.replace(', ', '__').replace(' ', '').replace('(', '_').replace(')', '_').replace("'", ''))
     print('Params', sum(p.numel() for p in trainer.model.parameters()))
+
+    if init_ckpt_path is not None:
+        print('Load init params')
+        state_dict = deflatten(torch.load(init_ckpt_path, map_location='cpu')['model'], maxdepth=1)
+        trainer.model.cnn.load_state_dict(state_dict['cnn'])
+    if frozen_cnn_2d_layers:
+        print(f'Freeze {frozen_cnn_2d_layers} cnn_2d layers')
+        trainer.model.cnn.cnn_2d.freeze(frozen_cnn_2d_layers)
+    if frozen_cnn_1d_layers:
+        print(f'Freeze {frozen_cnn_1d_layers} cnn_1d layers')
+        trainer.model.cnn.cnn_1d.freeze(frozen_cnn_1d_layers)
 
     def add_tag_condition(example):
         example["tag_condition"] = example["weak_targets"]
@@ -231,7 +315,7 @@ def train(
             ))
     trainer.train(train_set, resume=resume)
 
-    if validation_ground_truth_filepath:
+    if validation_set_name:
         tuning.run(
             config_updates={
                 'debug': debug,

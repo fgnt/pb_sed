@@ -225,7 +225,7 @@ def lwlrap(target_mat, score_mat):
     lwlrap_score, per_class_lwlrap, weight_per_class = lwlrap_from_precisions(
         precision_at_hits, pos_class_indices, num_classes=target_mat.shape[1]
     )
-    return lwlrap_score, per_class_lwlrap
+    return lwlrap_score, per_class_lwlrap, weight_per_class
 
 
 def _positives_curve(targets, scores):

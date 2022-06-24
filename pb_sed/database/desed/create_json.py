@@ -17,10 +17,11 @@ Example usage:
 python -m pb_sed.database.desed.create_json -db /path/to/desed
 """
 
+import click
 import pandas as pd
+from copy import deepcopy
 from natsort import natsorted
 from pathlib import Path
-import click
 from paderbox.io.json_module import dump_json
 from pb_sed.paths import database_jsons_dir, pb_sed_root
 from pb_sed.database.helper import prepare_sound_dataset
@@ -151,23 +152,42 @@ def create_jsons(database_path: Path, json_path: Path, indent=4):
         ensure_ascii=False,
     )
     print(f'Dumped json {json_path / "desed.json"}')
+    database_pseudo_labeled = deepcopy(database)
     pseudo_labels_dir = pb_sed_root / 'exp' / 'strong_label_crnn_inference' / '2022-05-04-09-05-53'
     add_strong_labels(
-        database['datasets']['train_weak'],
+        database_pseudo_labeled['datasets']['train_weak'],
         read_ground_truth_file(pseudo_labels_dir / 'train_weak_pseudo_labeled.tsv')
     )
     add_strong_labels(
-        database['datasets']['train_unlabel_in_domain'],
+        database_pseudo_labeled['datasets']['train_unlabel_in_domain'],
         read_ground_truth_file(pseudo_labels_dir / 'train_unlabel_in_domain_pseudo_labeled.tsv')
     )
     dump_json(
-        database,
-        json_path / 'desed_pseudo_labeled.json',
+        database_pseudo_labeled,
+        json_path / 'desed_pseudo_labeled_without_external.json',
+        create_path=True,
+        indent=indent,
+        ensure_ascii=False,
+        )
+    print(f'Dumped json {json_path / "desed_pseudo_labeled_without_external.json"}')
+    database_pseudo_labeled = deepcopy(database)
+    pseudo_labels_dir = pb_sed_root / 'exp' / 'strong_label_crnn_inference' / '2022-06-24-10-06-21'
+    add_strong_labels(
+        database_pseudo_labeled['datasets']['train_weak'],
+        read_ground_truth_file(pseudo_labels_dir / 'train_weak_pseudo_labeled.tsv')
+    )
+    add_strong_labels(
+        database_pseudo_labeled['datasets']['train_unlabel_in_domain'],
+        read_ground_truth_file(pseudo_labels_dir / 'train_unlabel_in_domain_pseudo_labeled.tsv')
+    )
+    dump_json(
+        database_pseudo_labeled,
+        json_path / 'desed_pseudo_labeled_with_external.json',
         create_path=True,
         indent=indent,
         ensure_ascii=False,
     )
-    print(f'Dumped json {json_path / "desed_pseudo_labeled.json"}')
+    print(f'Dumped json {json_path / "desed_pseudo_labeled_with_external.json"}')
 
 
 @click.command()
