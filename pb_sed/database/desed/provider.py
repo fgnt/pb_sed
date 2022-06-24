@@ -11,7 +11,6 @@ class DESEDProvider(DataProvider):
     def finalize_dogmatic_config(cls, config):
         config['json_path'] = str(database_jsons_dir / 'desed.json')
         config['validate_set'] = 'validation'
-        config['cached_datasets'] = ['train_weak', 'train_synthetic20']
         super().finalize_dogmatic_config(config)
         num_events = 10
         config['train_fetcher']['min_label_diversity_in_batch'] = min(
@@ -24,6 +23,7 @@ class DESEDProvider(DataProvider):
                 'train_unlabel_in_domain': 14412,
                 'train_synthetic20': 2576,
                 'train_synthetic21': 10000,
+                'train_strong': 3470,
             }
             dataset_lengths = {
                 key: config['train_set'].get(key, 0) * dataset_lengths[key]

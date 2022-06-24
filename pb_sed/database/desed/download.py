@@ -77,6 +77,18 @@ def main(database_path, n_jobs, chunk_size):
     (database_path / 'metadata' / 'validation' / '._test_dcase2018.tsv').unlink()
     (database_path / 'metadata' / 'validation' / '._eval_dcase2018.tsv').unlink()
     shutil.move(str(Path('missing_files').absolute()), str(database_path / 'missing_files'))
+    download_file_list(
+        ["https://zenodo.org/record/6444477/files/audioset_strong.tsv"],
+        database_path / 'metadata' / 'train'
+    )
+    (database_path / 'metadata' / 'train' / 'audioset_strong.tsv').absolute().rename(
+        database_path / 'metadata' / 'train' / 'strong.tsv')
+    desed.download.download_audioset_files_from_csv(
+        str(database_path / 'metadata' / 'train' / 'strong.tsv'),
+        str(database_path / "audio" / "train" / "strong"),
+        missing_files_tsv=str(database_path / 'missing_files' / "missing_files_strong.tsv"),
+        n_jobs=n_jobs,
+    )
 
     # ##########
     # Synthetic soundscapes DCASE 2020
