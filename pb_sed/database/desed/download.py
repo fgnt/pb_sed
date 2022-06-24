@@ -26,6 +26,7 @@ import click
 import desed
 from desed.download import split_desed_soundbank_train_val
 from pathlib import Path
+import shutil
 from paderbox.io.download import download_file_list
 
 
@@ -61,6 +62,7 @@ def main(database_path, n_jobs, chunk_size):
 
     """
     database_path = Path(database_path).absolute()
+    database_path.mkdir(parents=True, exist_ok=True)
 
     # ##########
     # Real data
@@ -74,7 +76,7 @@ def main(database_path, n_jobs, chunk_size):
     (database_path / 'metadata' / 'validation' / 'eval_dcase2018.tsv').unlink()
     (database_path / 'metadata' / 'validation' / '._test_dcase2018.tsv').unlink()
     (database_path / 'metadata' / 'validation' / '._eval_dcase2018.tsv').unlink()
-    Path('missing_files').absolute().rename(database_path / 'missing_files')
+    shutil.move(str(Path('missing_files').absolute()), str(database_path / 'missing_files'))
 
     # ##########
     # Synthetic soundscapes DCASE 2020

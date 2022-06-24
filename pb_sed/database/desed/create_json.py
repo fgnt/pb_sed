@@ -53,7 +53,6 @@ def construct_json(database_path):
     database = {
         'datasets': dict()
     }
-    audio_lengths = dict()
     for purpose in ['train', 'validation', 'eval']:
         audio_base_dir = database_path / 'audio' / purpose
         for subdir in audio_base_dir.iterdir():
@@ -76,22 +75,14 @@ def construct_json(database_path):
                 examples[clip_id] = {
                     'audio_path': str(audio_path),
                 }
-            if 'synthetic' in name or dataset_name in ['validation', 'eval_public']:
+            if 'synthetic' in name or dataset_name in ['validation', 'eval_public', 'train_strong']:
                 assert ground_truth is not None
                 add_strong_labels(examples, ground_truth)
             elif ground_truth:
                 assert dataset_name == 'train_weak', name
                 add_weak_labels(examples, ground_truth)
-            database['datasets'][dataset_name], _ = prepare_sound_dataset(examples)
-            audio_lengths[dataset_name] = {
-                example_id: example['audio_length']
-                for example_id, example in database['datasets'][dataset_name].items()
-            }
-
-            print(
-                f'{len(clip_ids) - len(database["datasets"][dataset_name])}'
-                f' from {len(clip_ids)} files missing in {dataset_name}.'
-            )
+            database['datasets'][dataset_name], missing = prepare_sound_dataset(examples)
+            print(f'{len(missing)} from {len(clip_ids)} files missing in {dataset_name}')
             events = {
                 event
                 for example in database["datasets"][dataset_name].values()
@@ -123,6 +114,9 @@ def add_strong_labels(examples, events):
         if len(event_list) > 0:
             assert isinstance(event_list[0], (list, tuple)), event_list
             event_list = [event for event in event_list if event[2] in target_events]
+            for event in event_list:
+                if event[2] not in target_events:
+                    print(events[2])
             event_onsets, event_offsets, event_list = list(zip(*event_list))
         else:
             event_onsets, event_offsets, event_list = [], [], []
