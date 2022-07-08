@@ -1,7 +1,7 @@
 # pb_sed: Paderborn Sound Event Detection
 
-This repository provides the source code for our
-[DCASE 2022 Challenge Task 4](https://dcase.community/challenge2022/task-sound-event-detection-in-domestic-environments) participation,
+This repository provides the source code for our 1-st rank solution for
+[DCASE 2022 Challenge Task 4](https://dcase.community/challenge2022/task-sound-event-detection-in-domestic-environments-results),
 which advanced from our 3-rd rank and 4-th rank solutions for the
 [DCASE 2020 Challenge Task 4](https://dcase.community/challenge2020/task-sound-event-detection-and-separation-in-domestic-environments-results)
 and [DCASE 2021 Challenge Task 4](https://dcase.community/challenge2021/task-sound-event-detection-and-separation-in-domestic-environments-results),
@@ -144,7 +144,7 @@ existing AudioSet download.
 
 Run
 ```bash
-$ python -m pb_sed.database.audioset.create_json -db /path/to/desed
+$ python -m pb_sed.database.audioset.create_json -db /path/to/audioset
 ```
 to create the json file ```/path/to/pb_sed/jsons/audioset.json``` (describing the database).
 
@@ -175,7 +175,7 @@ and ```data_provider.train_set.train_unlabel_in_domain=2``` to the command, e.g.
 $ python -m pb_sed.experiments.weak_label_crnn.training with data_provider.json_path=/path/to/pb_sed/jsons/desed_pseudo_labeled_with_external.json data_provider.train_set.train_unlabel_in_domain=2
 ```
 
-Add ```external=False``` to the commands to exclude external data from FBCRNN training.
+Add ```external_data=False``` to the commands to exclude external data from FBCRNN training.
 
 For hyper-parameter tuning, run
 ```bash
@@ -204,7 +204,7 @@ $ python -m pb_sed.experiments.strong_label_crnn.training with weak_label_crnn_h
 
 To train tag-conditioned BiCRNNs instead add ```trainer.model.tag_conditioning=True``` to the commands.
 
-Add ```external=False``` to the commands to exclude external data from BiCRNN training and to use pseudo labels obtained without external data. 
+Add ```external_data=False``` to the commands to exclude external data from BiCRNN training and to use pseudo labels obtained without external data.
 
 For hyper-parameter tuning, run
 ```bash
