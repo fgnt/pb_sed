@@ -46,7 +46,5 @@ class DataFetcher:
                 expiration=self.bucket_expiration,
                 drop_incomplete=self.drop_incomplete,
                 sort_key="seq_len", reverse_sort=True,
-            ).map(Collate()).prefetch(
-                num_workers=1, buffer_size=2 * self.batch_size,
-            )
+            ).map(Collate()).prefetch(num_workers=1, buffer_size=4)
         return dataset
