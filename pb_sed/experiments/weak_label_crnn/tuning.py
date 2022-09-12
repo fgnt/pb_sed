@@ -150,6 +150,7 @@ def main(
     audio_durations = {
         example['example_id']: example['audio_length']
         for example in data_provider.db.get_dataset(validation_set_name)
+        if 'audio_length' in example
     }
 
     timestamps = {

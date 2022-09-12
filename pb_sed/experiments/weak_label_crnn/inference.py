@@ -456,6 +456,7 @@ def main(
         audio_durations = {
             example['example_id']: example['audio_length']
             for example in data_provider.db.get_dataset(dataset_name[i])
+            if 'audio_length' in example
         }
 
         score_storage_dir = storage_dir / 'scores' / dataset_name[i]
