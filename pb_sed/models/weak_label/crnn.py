@@ -7,20 +7,19 @@ from padertorch.contrib.je.modules.conv import Pad
 from padertorch.contrib.je.modules.hybrid import CNN
 from padertorch.contrib.je.modules.features import NormalizedLogMelExtractor
 from padertorch.contrib.je.modules.reduce import TakeLast, Mean
-from padertorch.contrib.je.modules.rnn import GRU
+from padertorch.contrib.je.modules.rnn import GRU, TransformerEncoder
 from pb_sed.models import base
 
 
 class CRNN(base.SoundEventModel):
     """
-    >>> from padertorch.contrib.je.modules.transformer import TransformerStack
     >>> config = CRNN.get_config({\
             'cnn': {\
                 'factory': CNN,\
                 'cnn_2d': {'out_channels':[32,32,32], 'kernel_size': 3},\
                 'cnn_1d': {'out_channels':[32,32], 'kernel_size': 3},\
             },\
-            'rnn_fwd': {'factory': GRU, 'hidden_size': 64, 'output_net': {'out_channels':[32,10], 'kernel_size': 1}},\
+            'rnn_fwd': {'factory': GRU, 'rnn': {'hidden_size': 64}, 'output_net': {'out_channels':[32,10], 'kernel_size': 1}},\
             'feature_extractor': {\
                 'sample_rate': 16000,\
                 'stft_size': 512,\
@@ -28,16 +27,16 @@ class CRNN(base.SoundEventModel):
             },\
         })
     >>> crnn = CRNN.from_config(config)
-    >>> inputs = {'stft': torch.randn((4, 1, 15, 257, 2)), 'seq_len': [15, 14, 13, 12], 'weak_targets': torch.zeros((4,10)), 'boundary_targets': torch.zeros((4,10,15))}
     >>> np.random.seed(3)
+    >>> inputs = {'stft': torch.tensor(np.random.randn(4, 1, 15, 257, 2), dtype=torch.float32), 'seq_len': [15, 14, 13, 12], 'weak_targets': torch.zeros((4,10)), 'boundary_targets': torch.zeros((4,10,15))}
     >>> outputs = crnn({**inputs})
     >>> outputs[0].shape
     torch.Size([4, 10, 15])
     >>> review = crnn.review(inputs, outputs)
     """
     def __init__(
-            self, feature_extractor, cnn, rnn_fwd, rnn_bwd, *,
-            minimum_score=1e-5, label_smoothing=0.,
+            self, feature_extractor, cnn, rnn_fwd, rnn_bwd,
+            *, minimum_score=1e-5, label_smoothing=0.,
             labelwise_metrics=(), label_mapping=None, test_labels=None,
             slat=False, strong_fwd_bwd_loss_weight=1., class_weights=None,
     ):
@@ -60,11 +59,11 @@ class CRNN(base.SoundEventModel):
         return self.minimum_score + (1-2*self.minimum_score) * nn.Sigmoid()(y)
 
     def fwd_tagging(self, h, seq_len):
-        y, seq_len_y = self.rnn_fwd(h, seq_len=seq_len)
+        y, seq_len_y = self.rnn_fwd(h, seq_len)
         return self.sigmoid(y), seq_len_y
 
     def bwd_tagging(self, h, seq_len):
-        y, seq_len_y = self.rnn_bwd(h, seq_len=seq_len)
+        y, seq_len_y = self.rnn_bwd(h, seq_len)
         return self.sigmoid(y), seq_len_y
 
     def forward(self, inputs):
@@ -100,10 +99,10 @@ class CRNN(base.SoundEventModel):
             assert (seq_len_y_ == seq_len_y).all()
         return y_fwd, y_bwd, seq_len_y, x, seq_len_x, targets
 
-    def read_targets(self, inputs):
-        weak_targets = inputs['weak_targets']
-        boundary_targets = inputs['boundary_targets']
-        return weak_targets, boundary_targets
+    def read_targets(self, inputs, subsample_idx=None):
+        if 'boundary_targets' in inputs:
+            return inputs['weak_targets'], inputs['boundary_targets']
+        return inputs['weak_targets'],
 
     def review(self, inputs, outputs):
         """compute loss and metrics
@@ -117,27 +116,33 @@ class CRNN(base.SoundEventModel):
         """
         y_fwd, y_bwd, seq_len, x, _, targets = outputs
         assert targets is not None
-        weak_targets, boundary_targets, *_ = targets
+        weak_targets = targets[0]
         weak_targets_mask = (weak_targets < .01) + (weak_targets > .99)
         weak_targets = weak_targets * weak_targets_mask
-
-        if self.slat:
-            boundary_targets = weak_targets[..., None].expand(
-                boundary_targets.shape)
-        boundary_targets_mask = (boundary_targets > .99) + (boundary_targets < .01)
-        boundary_targets_mask = boundary_targets_mask * (boundary_targets_mask.float().mean(-1, keepdim=True) > .999) * (weak_targets > .99)[..., None]
+        weak_label_rate = weak_targets_mask.detach().cpu().numpy().mean()
 
         loss = (
             self.compute_weak_fwd_bwd_loss(y_fwd, y_bwd, weak_targets, seq_len)
             * weak_targets_mask[..., None]
         )
 
-        if (boundary_targets_mask == 1).any() and self.strong_fwd_bwd_loss_weight > 0.:
-            strong_label_loss = self.compute_strong_fwd_bwd_loss(
+        if self.strong_fwd_bwd_loss_weight > 0.:
+            if self.slat:
+                boundary_targets = weak_targets[..., None].expand(y_fwd.shape)
+            else:
+                assert len(targets) == 2, len(targets)
+                boundary_targets = targets[1]
+            boundary_targets_mask = (boundary_targets > .99) + (boundary_targets < .01)
+            boundary_targets_mask = boundary_targets_mask * (boundary_targets_mask.float().mean(-1, keepdim=True) > .999) * (weak_targets > .99)[..., None]
+            boundary_label_rate = boundary_targets_mask.detach().cpu().numpy().mean()
+            if (boundary_targets_mask == 1).any():
+                strong_label_loss = self.compute_strong_fwd_bwd_loss(
                 y_fwd, y_bwd, boundary_targets)
-            strong_fwd_bwd_loss_weight = (
-                boundary_targets_mask * self.strong_fwd_bwd_loss_weight)
-            loss = strong_fwd_bwd_loss_weight * strong_label_loss + (1. - strong_fwd_bwd_loss_weight) * loss
+                strong_fwd_bwd_loss_weight = (
+                    boundary_targets_mask * self.strong_fwd_bwd_loss_weight)
+                loss = strong_fwd_bwd_loss_weight * strong_label_loss + (1. - strong_fwd_bwd_loss_weight) * loss
+        else:
+            boundary_label_rate = 0.
 
         loss = Mean(axis=-1)(loss, seq_len)
         if self.class_weights is None:
@@ -159,8 +164,8 @@ class CRNN(base.SoundEventModel):
             loss=loss,
             scalars=dict(
                 seq_len=np.mean(inputs['seq_len']),
-                weak_label_rate=weak_targets_mask.detach().cpu().numpy().mean(),
-                boundary_label_rate=boundary_targets_mask.detach().cpu().numpy().mean(),
+                weak_label_rate=weak_label_rate,
+                boundary_label_rate=boundary_label_rate,
             ),
             images=dict(
                 features=x[:3],
@@ -324,16 +329,11 @@ class CRNN(base.SoundEventModel):
         config['cnn']['input_height'] = input_size
         input_size = config['cnn']['cnn_1d']['out_channels'][-1]
 
-        if config['rnn_fwd']['factory'] == GRU:
-            config['rnn_fwd'].update({
-                'num_layers': 1,
-                'bias': True,
-                'dropout': 0.,
-                'bidirectional': False
-            })
-
         if input_size is not None:
-            config['rnn_fwd']['input_size'] = input_size
+            if config['rnn_fwd']['rnn'] is None:
+                config['rnn_fwd']['output_net']['in_channels'] = input_size
+            else:
+                config['rnn_fwd']['rnn']['input_size'] = input_size
 
         if config['rnn_bwd'] is not None:
             # assert config['rnn_bwd']['factory'] == config['rnn_fwd']['factory'], (config['rnn_fwd']['factory'], config['rnn_bwd']['factory'])

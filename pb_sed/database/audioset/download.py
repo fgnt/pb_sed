@@ -73,6 +73,8 @@ def _worker(
     with suppress_stderr(), yt_dlp.YoutubeDL(ydl_opts) as ydl:
         while not input_queue.empty():
             clips = input_queue.get()
+            if clips is None:
+                break
             for clip_id, start, end in clips:
                 try:
                     _download_clip(clip_id, start, end, ydl, output_folder, info_folder)
@@ -121,15 +123,23 @@ def download_clips(
 
     pbar = tqdm(initial=0, total=len(clips))
     try:
+        num_downloaded = 0
         while not input_queue.empty():
             while not output_queue.empty():
                 output_queue.get()
                 pbar.update(1)
+                num_downloaded += 1
             time.sleep(1)
-        time.sleep(20)
-        while not output_queue.empty():
-            output_queue.get()
-            pbar.update(1)
+        tic = time.time()
+        while ((time.time()-tic) < 5.*chunksize) and (num_downloaded < len(clips)):
+            time.sleep(1.)
+            while not output_queue.empty():
+                output_queue.get()
+                pbar.update(1)
+                num_downloaded += 1
+        for _ in workers:
+            input_queue.put(None)
+        time.sleep(10.)
     finally:
         pbar.close()
 
@@ -138,15 +148,29 @@ def download_clips_from_csv(
         csv_file, output_folder, info_folder, num_jobs=8, chunksize=20,
         cookiefile=None, verbose=False
 ):
+    clips = read_clips_from_csv(csv_file)
+    download_clips(
+        clips, output_folder, info_folder, num_jobs=num_jobs, chunksize=chunksize,
+        cookiefile=cookiefile, verbose=verbose
+    )
+
+
+def read_clips_from_csv(csv_file):
     with csv_file.open() as fid:
         clips = [
             (row[0], row[1], row[2]) for row in csv.reader(fid)
             if len(row) > 0 and not row[0].startswith('#')
         ]
-    download_clips(
-        clips, output_folder, info_folder, num_jobs=num_jobs, chunksize=chunksize,
-        cookiefile=cookiefile, verbose=verbose
-    )
+    return clips
+
+
+def read_clip_ids_from_tsv(tsv_file):
+    with tsv_file.open() as fid:
+        clip_ids = {
+            row[0].rsplit('_', maxsplit=1)[0]
+            for row in csv.reader(fid, delimiter="\t", quotechar='"')[1:]
+        }
+    return clip_ids
 
 
 @click.command()
@@ -197,27 +221,59 @@ def download(
 
     remote = 'http://storage.googleapis.com/us_audioset/youtube_corpus'
     remote_files = [
-        remote + "/v1/csv/" + (dataset + '_segments.csv') for dataset in datasets
+        remote + "/v1/csv/" + (dataset + '_segments.csv')
+        for dataset in ['balanced_train', 'eval', 'unbalanced_train']
     ]
     remote_files.append(remote + "/v1/csv/" + 'class_labels_indices.csv')
     remote_files.append(remote + '/strong/audioset_train_strong.tsv')
     remote_files.append(remote + '/strong/audioset_eval_strong.tsv')
     remote_files.append(remote + '/strong/mid_to_display_name.tsv')
+    remote_files.append("https://raw.githubusercontent.com/audioset/ontology/master/ontology.json")
     local_files = [database_path / file.split("/")[-1] for file in remote_files]
     for remote_file, local_file in zip(remote_files, local_files):
         urlretrieve(remote_file, str(local_file))
     audio_dir = database_path / 'audio'
     info_dir = database_path / 'info'
-    for dataset_name, csv_file in zip(datasets, local_files[:len(datasets)]):
-        print(f'Download {dataset_name}.')
-        download_clips_from_csv(
-            csv_file=csv_file,
-            output_folder=audio_dir / dataset_name,
-            info_folder=info_dir / dataset_name,
-            num_jobs=num_jobs,
-            cookiefile=cookiefile,
-            verbose=verbose,
-        )
+    for dataset_name in datasets:
+        if dataset_name == "train_strong":
+            if "balanced_train" not in datasets:
+                print(f'Download {dataset_name} examples from balanced_train.')
+                balanced_train_clips = read_clips_from_csv(database_path / f'balanced_train_segments.csv')
+                train_strong_clip_ids = read_clip_ids_from_tsv(database_path / f'audioset_train_strong.tsv')
+                clips = [clip for clip in balanced_train_clips if clip[0] in train_strong_clip_ids]
+                download_clips(
+                    clips,
+                    output_folder=audio_dir / dataset_name,
+                    info_folder=info_dir / dataset_name,
+                    num_jobs=num_jobs,
+                    cookiefile=cookiefile,
+                    verbose=verbose,
+                )
+            if "unbalanced_train" not in datasets:
+                print(f'Download {dataset_name} examples from unbalanced_train.')
+                unbalanced_train_clips = read_clips_from_csv(database_path / f'unbalanced_train_segments.csv')
+                train_strong_clip_ids = read_clip_ids_from_tsv(database_path / f'audioset_train_strong.tsv')
+                clips = [clip for clip in unbalanced_train_clips if clip[0] in train_strong_clip_ids]
+                download_clips(
+                    clips,
+                    output_folder=audio_dir / dataset_name,
+                    info_folder=info_dir / dataset_name,
+                    num_jobs=num_jobs,
+                    cookiefile=cookiefile,
+                    verbose=verbose,
+                )
+        else:
+            assert dataset_name in ['balanced_train', 'eval', 'unbalanced_train'], dataset_name
+            print(f'Download {dataset_name}.')
+            csv_file = database_path / f'{dataset_name}_segments.csv'
+            download_clips_from_csv(
+                csv_file=csv_file,
+                output_folder=audio_dir / dataset_name,
+                info_folder=info_dir / dataset_name,
+                num_jobs=num_jobs,
+                cookiefile=cookiefile,
+                verbose=verbose,
+            )
 
 
 if __name__ == "__main__":

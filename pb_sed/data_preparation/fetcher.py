@@ -13,6 +13,7 @@ class DataFetcher:
     min_label_diversity_in_batch: int = 0  # must not be chosen larger than the number of classes in the input dataset, otherwise fetching gets stuck
     min_dataset_examples_in_batch: dict = None  # the min percentage of a certain dataset in a batch shouldn't exceed the percentage of the dataset in the overall dataset
     bucket_expiration: int = None
+    max_bucket_buffer_size: int = None
     drop_incomplete: bool = False
 
     def __call__(self, dataset, batched_input=False):
@@ -44,6 +45,7 @@ class DataFetcher:
                 label_key="weak_targets",
                 min_dataset_examples=self.min_dataset_examples_in_batch,
                 expiration=self.bucket_expiration,
+                max_buffered_examples=self.max_bucket_buffer_size,
                 drop_incomplete=self.drop_incomplete,
                 sort_key="seq_len", reverse_sort=True,
             ).map(Collate()).prefetch(num_workers=1, buffer_size=4)

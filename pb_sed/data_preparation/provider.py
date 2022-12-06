@@ -49,6 +49,8 @@ class DataProvider(Configurable):
         return self.get_dataset(self.train_set, train=True, filter_example_ids=filter_example_ids)
 
     def get_validate_set(self, filter_example_ids=None):
+        if self.validate_set is None:
+            return None
         return self.get_dataset(self.validate_set, train=False, filter_example_ids=filter_example_ids)
 
     def get_dataset(self, dataset_names_or_raw_datasets, train=False, filter_example_ids=None):
@@ -138,26 +140,30 @@ class DataProvider(Configurable):
             filter_example_ids=None,
     ):
         if isinstance(dataset_names_or_raw_datasets, (dict, list, tuple)):
-            return list(filter(
-                lambda x: x[1] > 0,
-                [
-                    (
-                        self.get_raw(
-                            name_or_ds[0] if isinstance(name_or_ds, (list, tuple))
-                            else name_or_ds,
-                            discard_labelless_examples=discard_labelless_examples,
-                            filter_example_ids=filter_example_ids,
-                        ),
-                        (
-                            dataset_names_or_raw_datasets[name_or_ds]
-                            if isinstance(dataset_names_or_raw_datasets, dict)
-                            else name_or_ds[1] if isinstance(name_or_ds, (list, tuple))
-                            else 1
-                        ),
-                    )
-                    for name_or_ds in dataset_names_or_raw_datasets
-                ]
+            if isinstance(dataset_names_or_raw_datasets, dict):
+                dataset_names_or_raw_datasets = list(dataset_names_or_raw_datasets.items())
+            if (
+                isinstance(dataset_names_or_raw_datasets, (list, tuple))
+                and not isinstance(dataset_names_or_raw_datasets[0], (list, tuple))
+            ):
+                dataset_names_or_raw_datasets = [
+                    (ds, 1) for ds in dataset_names_or_raw_datasets]
+
+            dataset_names_or_raw_datasets = list(filter(
+                lambda x: x[1] > 0, dataset_names_or_raw_datasets
             ))
+            return [
+                (
+                    self.get_raw(
+                        name_or_ds[0] if isinstance(name_or_ds, (list, tuple))
+                        else name_or_ds,
+                        discard_labelless_examples=discard_labelless_examples,
+                        filter_example_ids=filter_example_ids,
+                    ),
+                    name_or_ds[1],
+                )
+                for name_or_ds in dataset_names_or_raw_datasets
+            ]
         elif isinstance(dataset_names_or_raw_datasets, str):
             ds = self.db.get_dataset(dataset_names_or_raw_datasets)
         else:
@@ -335,23 +341,25 @@ class DataProvider(Configurable):
             'factory': Transform,
             'stft': config['train_transform']['stft'],
             'label_encoder': config['train_transform']['label_encoder'],
+            'provide_boundary_targets': config['train_transform']['provide_boundary_targets'],
+            'provide_strong_targets': config['train_transform']['provide_strong_targets'],
         }
         config['train_fetcher'] = {
             'factory': DataFetcher,
             'prefetch_workers': 16,
             'batch_size': 16,
             'max_padding_rate': .05,
+            'max_bucket_buffer_size': 2000,
             'drop_incomplete': True,
             'global_shuffle': False,  # already shuffled in prepare_audio
         }
-        config['train_fetcher']['bucket_expiration'] = (
-            2000 * config['train_fetcher']['batch_size'])
         config['test_fetcher'] = {
             'factory': DataFetcher,
             'prefetch_workers': config['train_fetcher']['prefetch_workers'],
             'batch_size': 2 * config['train_fetcher']['batch_size'],
             'max_padding_rate': config['train_fetcher']['max_padding_rate'],
             'bucket_expiration': config['train_fetcher']['bucket_expiration'],
+            'max_bucket_buffer_size': config['train_fetcher']['max_bucket_buffer_size'],
             'drop_incomplete': False,
             'global_shuffle': False,
         }

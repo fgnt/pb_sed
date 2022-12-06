@@ -4,7 +4,7 @@ import click
 from copy import deepcopy
 from pathlib import Path
 
-from paderbox.io.json_module import dump_json
+from paderbox.io.json_module import dump_json, load_json
 from pb_sed.database.helper import prepare_sound_dataset
 from pb_sed.paths import database_jsons_dir
 
@@ -37,6 +37,9 @@ def construct_json(database_path: Path) -> dict:
             row['mid']: row['display_name'].strip('"')
             for row in csv.DictReader(f)
         }
+
+    # load ontology
+    ontology = read_ontology(database_path / 'ontology.json')
     # iterate over all segment files (datasets)
     for segment_file in sorted(database_path.glob('*_segments.csv')):
         # read segment file
@@ -116,7 +119,12 @@ def construct_json(database_path: Path) -> dict:
     datasets['eval_strong'] = eval_strong_examples
     print('Number of weak event classes:', len(weak_event_classes))
     print('Number of strong event classes:', len(strong_event_classes))
-    return {'datasets': datasets}
+    return {
+        'datasets': datasets,
+        'ontology': ontology,
+        'weak_event_classes': sorted(weak_event_classes),
+        'strong_event_classes': sorted(strong_event_classes),
+    }
 
 
 def read_weak_label_file(csv_file, mapping):
@@ -148,6 +156,56 @@ def read_strong_label_files(tsv_file, mapping):
     return strong_labels
 
 
+def read_ontology(ontology_json_file):
+    ontology = {
+        node['name']: node
+        for node in load_json(ontology_json_file)
+    }
+    mid_to_name = {
+        ontology[name]['id']: name for name in ontology
+    }
+    for name in ontology:
+        ontology[name]['child_names'] = [mid_to_name[child_id] for child_id in ontology[name]['child_ids']]
+        if 'parent_names' not in ontology[name]:
+            ontology[name]['parent_names'] = []
+        for child_name in ontology[name]['child_names']:
+            if 'parent_names' not in ontology[child_name]:
+                ontology[child_name]['parent_names'] = []
+            ontology[child_name]['parent_names'].append(name)
+
+    def recursively_write_ancestors(node_name, ancestors):
+        ancestors = sorted({*ancestors, node_name})
+        for child_name in ontology[node_name]['child_names']:
+            if 'ancestor_names' in ontology[child_name]:
+                ontology[child_name]['ancestor_names'] = sorted(
+                    {*ontology[child_name]['ancestor_names'], *ancestors}
+                )
+            else:
+                ontology[child_name]['ancestor_names'] = ancestors
+            recursively_write_ancestors(child_name, ancestors)
+
+    def recursively_write_descendants(node_name, descendants):
+        descendants = sorted({*descendants, node_name})
+        for parent_name in ontology[node_name]['parent_names']:
+            if 'descendant_names' in ontology[parent_name]:
+                ontology[parent_name]['descendant_names'] = sorted(
+                    {*ontology[parent_name]['descendant_names'], *descendants}
+                )
+            else:
+                ontology[parent_name]['descendant_names'] = descendants
+            recursively_write_descendants(parent_name, descendants)
+
+    for name in ontology:
+        if not ontology[name]['parent_names']:
+            ontology[name]['ancestor_names'] = []
+            recursively_write_ancestors(name, [])
+        if not ontology[name]['child_names']:
+            ontology[name]['descendant_names'] = []
+            recursively_write_descendants(name, [])
+
+    return ontology
+
+
 def create_json(database_path: Path, json_path: Path, indent=4):
     database = construct_json(database_path)
     dump_json(
@@ -170,7 +228,7 @@ def create_json(database_path: Path, json_path: Path, indent=4):
     default=str(database_jsons_dir / 'audioset.json'),
     help=f'Output path for the generated JSON file. If the file exists, it '
          f'gets overwritten. Defaults to '
-         f'"{database_jsons_dir / "audio_set.json"}".',
+         f'"{database_jsons_dir / "audioset.json"}".',
     type=click.Path(dir_okay=False, writable=True),
 )
 def main(database_path, json_path):

@@ -37,9 +37,9 @@ in Proc. Workshop on Detection and Classification of Acoustic Scenes and Events 
 ## Installation
 Install requirements:
 ```bash
-$ pip install --user git+https://github.com/fgnt/padertorch.git@47bf5b1850cf0f2ab8e9cb69f43181c61bd78f12
+$ pip install --user git+https://github.com/fgnt/padertorch.git@b7ba24a42a05745d127a74a519af08a876319a95
 $ pip install --user git+https://github.com/fgnt/paderbox.git@809b27251c478f1997d2720b89fe455aac23234e
-$ pip install --user git+https://github.com/fgnt/lazy_dataset.git@c31ea9837bce58569d77525f6cb5e3c043b8a4e9
+$ pip install --user git+https://github.com/fgnt/lazy_dataset.git@dc9f487bd433a9ccc8e157d58e338074e3cd8705
 $ pip install --user git+https://github.com/fgnt/sed_scores_eval.git@a922e0a4692957d56b307a2eec942422ab22b55a
 ```
 
@@ -176,6 +176,7 @@ $ python -m pb_sed.experiments.weak_label_crnn.training with data_provider.json_
 ```
 
 Add ```external_data=False``` to the commands to exclude external data from FBCRNN training.
+Add ```batch_size=<batch size>``` to the commands to adjust the batch size (e.g. if CUDA out of memory).
 
 For hyper-parameter tuning, run
 ```bash
@@ -214,24 +215,24 @@ which saves hyper-parameters in a directory ```/path/to/storage_root/strong_labe
 
 For evaluation on the public evaluation set, run
 ```bash
-$ python -m pb_sed.experiments.strong_label_crnn.inference with strong_label_crnn/desed/hyper_params_dir=/path/to/storage_root/strong_label_crnn/desed/hyper_params/<timestamp>
+$ python -m pb_sed.experiments.strong_label_crnn.inference with strong_label_crnn_hyper_params_dir=/path/to/storage_root/strong_label_crnn/desed/hyper_params/<timestamp>
 ```
 
 
 ### AudioSet Pre-training
 To pre-train a deeper and wider FBCRNN on AudioSet (excluding DESED validation clips), run
 ```bash
-$ python -m pb_sed.experiments.weak_label_crnn.training with database=audioset net_config=deep m=2 filter_desed_test_clips=True
+$ python -m pb_sed.experiments.weak_label_crnn.training with database=audioset net_config=deep width=2 filter_desed_test_clips=True
 ```
 
 To train an FBCRNN from the pretrained model (with some frozen layers), run
 ```bash
-$ python -m pb_sed.experiments.weak_label_crnn.training with net_config=deep m=2 init_ckpt_path=/path/to/storage_root/weak_label_crnn/audioset/training/<group_timestamp>/<model_timestamp> frozen_cnn_2d_layers=18 frozen_cnn_1d_layers=1
+$ python -m pb_sed.experiments.weak_label_crnn.training with net_config=deep width=2 init_ckpt_path=/path/to/storage_root/weak_label_crnn/audioset/training/<group_timestamp>/<model_timestamp> frozen_cnn_2d_layers=18 frozen_cnn_1d_layers=1
 ```
 
 To train an unconditioned BiCRNN from the pretrained model (with some frozen layers), run
 ```bash
-$ python -m pb_sed.experiments.strong_crnn.training with net_config=deep m=2 init_ckpt_path=/path/to/storage_root/weak_label_crnn/audioset/training/<group_timestamp>/<model_timestamp> frozen_cnn_2d_layers=18 frozen_cnn_1d_layers=1 weak_label_crnn_hyper_params_dir=/path/to/storage_root/weak_label_crnn/desed/hyper_params/<timestamp>
+$ python -m pb_sed.experiments.strong_crnn.training with net_config=deep width=2 init_ckpt_path=/path/to/storage_root/weak_label_crnn/audioset/training/<group_timestamp>/<model_timestamp> frozen_cnn_2d_layers=18 frozen_cnn_1d_layers=1 weak_label_crnn_hyper_params_dir=/path/to/storage_root/weak_label_crnn/desed/hyper_params/<timestamp>
 ```
 
 To train a tag-conditioned BiCRNN instead, add ```trainer.model.tag_conditioning=True``` to the command.

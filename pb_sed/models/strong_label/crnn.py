@@ -1,6 +1,7 @@
 import numpy as np
 import torch
 from torch import nn
+from paderbox.array import segment_axis
 from padertorch.ops.sequence.mask import compute_mask
 from padertorch.contrib.je.modules.hybrid import CNN
 from padertorch.contrib.je.modules.features import NormalizedLogMelExtractor
@@ -19,7 +20,12 @@ class CRNN(base.SoundEventModel):
                 'cnn_1d': {'out_channels':[32,32], 'kernel_size': 3},\
             },\
             'rnn': {\
-                'factory': GRU, 'bidirectional': True, 'hidden_size': 64,\
+                'factory': GRU,\
+                'rnn': {\
+                    'bidirectional': True,\
+                    'hidden_size': 64,\
+                    'num_layers': 2,\
+                },\
                 'output_net': {'out_channels':[32,10], 'kernel_size': 1}\
             },\
             'feature_extractor': {\
@@ -29,7 +35,8 @@ class CRNN(base.SoundEventModel):
             },\
         })
     >>> crnn = CRNN.from_config(config)
-    >>> inputs = {'stft': torch.randn((4, 1, 5, 257, 2)), 'seq_len': [5,4,3,2], 'weak_targets': torch.zeros((4,10)), 'strong_targets': torch.zeros((4,10,5))}
+    >>> crnn.rnn.output_net.in_channels
+    >>> inputs = {'stft': torch.randn((4, 1, 5, 257, 2)), 'seq_len': [5,4,3,2], 'weak_targets': torch.zeros((4,10)), 'strong_targets': torch.zeros((4,10,5)), 'tag_condition': torch.zeros((4,10))}
     >>> outputs = crnn(inputs)
     >>> outputs[0].shape
     torch.Size([4, 10, 5])
@@ -38,6 +45,7 @@ class CRNN(base.SoundEventModel):
     def __init__(
             self, feature_extractor, cnn, rnn, *,
             tag_conditioning=False, labelwise_metrics=(), label_mapping=None,
+            eval_segment_length=1,
     ):
         super().__init__(
             labelwise_metrics=labelwise_metrics,
@@ -47,6 +55,7 @@ class CRNN(base.SoundEventModel):
         self.cnn = cnn
         self.rnn = rnn
         self.tag_conditioning = tag_conditioning
+        self.eval_segment_length = eval_segment_length
 
     def forward(self, inputs):
         """
@@ -75,11 +84,11 @@ class CRNN(base.SoundEventModel):
 
         tag_condition = inputs["tag_condition"].unsqueeze(-1) if self.tag_conditioning else None
         h, seq_len_h = self.cnn(x, seq_len_x, tag_condition if self.cnn.conditional_dims else None)
+
         if self.tag_conditioning:
             b, f, t = h.shape
             tag_condition = torch.broadcast_to(tag_condition, (b, tag_condition.shape[1], t))
             h = torch.cat([h, tag_condition], dim=1)
-
         y, seq_len_y = self.rnn(h, seq_len_h)
         return nn.Sigmoid()(y), seq_len_y, x, seq_len_x, targets
 
@@ -116,8 +125,14 @@ class CRNN(base.SoundEventModel):
                 strong_targets=strong_targets[:3],
             ),
             buffers=dict(
-                y_strong=np.concatenate([y[i, :, :seq_len_y[i]].T for i in strongly_labeled_examples_idx]),
-                targets_strong=np.concatenate([targets[i, :, :seq_len_y[i]].T for i in strongly_labeled_examples_idx]),
+                y_strong=np.concatenate([
+                    segment_axis(y[i, :, :seq_len_y[i]].T, self.eval_segment_length, self.eval_segment_length, axis=0).max(1)
+                    for i in strongly_labeled_examples_idx
+                ]),
+                targets_strong=np.concatenate([
+                    segment_axis(targets[i, :, :seq_len_y[i]].T, self.eval_segment_length, self.eval_segment_length, axis=0).max(1)
+                    for i in strongly_labeled_examples_idx
+                ]),
             )
         )
         return review
@@ -155,6 +170,7 @@ class CRNN(base.SoundEventModel):
         config['cnn'] = {'factory': CNN}
         config['rnn'] = {'factory': GRU}
         input_size = config['feature_extractor']['number_of_filters']
+        config['rnn']['rnn']['input_size'] = 1
         num_events = config['rnn']['output_net']['out_channels'][-1]
         in_channels = (
             1 + config['feature_extractor']['add_deltas']
@@ -171,7 +187,7 @@ class CRNN(base.SoundEventModel):
             input_size += num_events
 
         if config['rnn']['factory'] == GRU:
-            config['rnn'].update({
+            config['rnn']['rnn'].update({
                 'num_layers': 1,
                 'bias': True,
                 'dropout': 0.,
@@ -179,7 +195,7 @@ class CRNN(base.SoundEventModel):
             })
 
         if input_size is not None:
-            config['rnn']['input_size'] = input_size
+            config['rnn']['rnn']['input_size'] = input_size
 
     def tagging(self, inputs):
         y, seq_len_y, *_ = self.forward(inputs)
