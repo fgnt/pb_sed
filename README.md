@@ -189,6 +189,16 @@ For evaluation on the public evaluation set, run
 $ python -m pb_sed.experiments.weak_label_crnn.inference with hyper_params_dir=/path/to/storage_root/weak_label_crnn/desed/hyper_params/<timestamp>
 ```
 
+To perform pseudo labeling, run
+```bash
+$ python -m pb_sed.experiments.weak_label_crnn.inference with hyper_params_dir=/path/to/storage_root/weak_label_crnn/desed/hyper_params/<timestamp> dataset_name='["train_weak","train_unlabel_in_domain"]' weak_pseudo_labeling='[False,True]' boundary_pseudo_labeling=True
+```
+which will write a file ```/path/to/storage_root/weak_label_crnn/desed/inference/<timestamp>/desed.json``` with pseudo labeled data.
+
+To train on this pseudo labeled data, add (similar to training on our provided pseudo labeled data)
+```data_provider.json_path=/path/to/storage_root/weak_label_crnn/desed/inference/<timestamp>/desed.json```
+and ```data_provider.train_set.train_unlabel_in_domain=2``` to a training command.
+
 
 ### Bidirectional CRNN (requiring strong labels)
 To train an unconditioned bidirectional CRNN (BiCRNN) with our provided strong pseudo labels (with external data), run
@@ -217,6 +227,15 @@ For evaluation on the public evaluation set, run
 ```bash
 $ python -m pb_sed.experiments.strong_label_crnn.inference with strong_label_crnn_hyper_params_dir=/path/to/storage_root/strong_label_crnn/desed/hyper_params/<timestamp>
 ```
+
+To perform pseudo labeling, run
+```bash
+$ python -m pb_sed.experiments.strong_label_crnn.inference with strong_label_crnn_hyper_params_dir=/scratch/hpc-prf-nt1/ebbers/exp/strong_label_crnn_hyper_params/2022-06-13-11-15-54 dataset_name='["train_weak","train_unlabel_in_domain"]' strong_pseudo_labeling=True
+```
+which will write a file ```/path/to/storage_root/strong_label_crnn/desed/inference/<timestamp>/desed.json``` with pseudo labeled data.
+
+To train on this pseudo labeled data (instead of our provided pseudo labeled data), add
+```data_provider.json_path=/path/to/storage_root/strong_label_crnn/desed/inference/<timestamp>/desed.json``` to a training command.
 
 
 ### AudioSet Pre-training
