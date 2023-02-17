@@ -39,8 +39,8 @@ Install requirements:
 ```bash
 $ pip install --user git+https://github.com/fgnt/padertorch.git@b7ba24a42a05745d127a74a519af08a876319a95
 $ pip install --user git+https://github.com/fgnt/paderbox.git@809b27251c478f1997d2720b89fe455aac23234e
-$ pip install --user git+https://github.com/fgnt/lazy_dataset.git@dc9f487bd433a9ccc8e157d58e338074e3cd8705
 $ pip install --user git+https://github.com/fgnt/sed_scores_eval.git@a922e0a4692957d56b307a2eec942422ab22b55a
+$ pip install --user git+https://github.com/fgnt/lazy_dataset.git@dc9f487bd433a9ccc8e157d58e338074e3cd8705
 ```
 
 Clone the repository:
