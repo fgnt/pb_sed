@@ -137,7 +137,7 @@ def resample_db(
     for annotation_file in annotation_files:
         if annotation_file.is_file():
             file_name = annotation_file.name
-            shutil.copy(str(annotation_files), str(destination_path/file_name))
+            shutil.copy(str(annotation_file), str(destination_path/file_name))
 
     print(f'Resampled database created at {destination_path}')
 
